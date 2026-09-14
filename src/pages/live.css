@@ -1,0 +1,209 @@
+/**
+ * 实时跟练（专注模式）样式
+ * 只作用于 .focus 布局（该布局仅本页面使用）
+ */
+
+.focus {
+  height: 100dvh;
+  max-height: 100dvh;
+  overflow: hidden;
+}
+
+.focus-body {
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+}
+
+.lw-timer {
+  font-size: 19px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.3px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--card-2, rgba(120, 120, 128, 0.12));
+  color: var(--text);
+  min-width: 74px;
+  text-align: center;
+}
+
+.lw-progress {
+  height: 3px;
+  background: var(--sep);
+  margin: 0;
+  overflow: hidden;
+}
+
+.lw-progress > i {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  transition: width 0.3s ease;
+}
+
+.lw-head {
+  background: var(--card);
+  border-radius: var(--radius);
+  padding: 16px;
+  box-shadow: var(--shadow-sm);
+}
+
+.lw-kind {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--accent);
+  letter-spacing: 0.04em;
+}
+
+.lw-cue {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--card-2, rgba(120, 120, 128, 0.12));
+  color: var(--text);
+}
+
+.lw-sets {
+  margin-top: 12px;
+  padding: 14px 16px 16px;
+}
+
+.lw-inputs {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.lw-inputs .field {
+  margin: 0;
+}
+
+.lw-done-hint {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+  padding: 12px 14px;
+  border-radius: var(--radius-sm);
+  background: rgba(52, 199, 89, 0.14);
+  color: var(--green);
+  font-weight: 600;
+}
+
+.lw-history {
+  margin-top: 12px;
+  padding-top: 8px;
+  border-top: 1px solid var(--sep);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.lw-history-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 32px;
+}
+
+.lw-history-row > .small {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lw-history-row .link {
+  min-height: 32px;
+  padding: 0 8px;
+}
+
+/* 单手操作：底部一排操作按钮，触控目标 ≥44px */
+.lw-actions {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  margin: 14px 0 4px;
+}
+
+.lw-action {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-height: 58px;
+  padding: 6px 2px;
+  border: 1px solid var(--sep);
+  border-radius: 16px;
+  background: var(--card);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.1;
+}
+
+.lw-action:active {
+  background: var(--card-2, rgba(120, 120, 128, 0.16));
+}
+
+.lw-action.danger {
+  color: var(--red);
+  border-color: rgba(255, 59, 48, 0.32);
+}
+
+@media (max-width: 340px) {
+  .lw-actions {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+.lw-rest {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  padding: 12px 0 4px;
+}
+
+.lw-rest-time {
+  font-size: 42px;
+  font-weight: 750;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -1px;
+  line-height: 1.1;
+}
+
+.lw-paused {
+  text-align: center;
+  padding: 28px 18px;
+}
+
+.lw-paused-emoji {
+  font-size: 42px;
+  line-height: 1;
+  margin-bottom: 12px;
+}
+
+.lw-pain-list {
+  margin-top: 12px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* 表单控件在 iOS 上不放大：字号 ≥16px */
+.lw-inputs .input,
+.focus .input,
+.focus .textarea,
+.focus .stepper input {
+  font-size: 16px;
+}
+
+.focus .btn.xl {
+  min-height: 60px;
+  font-size: 18px;
+}
