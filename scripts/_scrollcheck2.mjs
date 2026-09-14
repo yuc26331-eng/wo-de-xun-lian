@@ -1,0 +1,15 @@
+import { chromium, devices } from "@playwright/test";
+const b = await chromium.launch();
+const c = await b.newContext({ ...devices["iPhone 15"] });
+const p = await c.newPage();
+await p.goto("http://127.0.0.1:5199/#/", { waitUntil: "networkidle" });
+await p.waitForTimeout(600);
+const before = await p.evaluate(() => ({ y: window.scrollY, vv: window.visualViewport?.pageTop, lastBottom: Math.round(document.querySelectorAll(".app-scroll .card:last-of-type")[0]?.getBoundingClientRect().bottom ?? -1) }));
+await p.mouse.wheel(0, 700);
+await p.waitForTimeout(500);
+const afterWheel = await p.evaluate(() => ({ y: window.scrollY, vv: window.visualViewport?.pageTop, lastBottom: Math.round(document.querySelectorAll(".app-scroll .card:last-of-type")[0]?.getBoundingClientRect().bottom ?? -1) }));
+await p.evaluate(() => window.scrollTo(0, 700));
+await p.waitForTimeout(400);
+const afterScrollTo = await p.evaluate(() => ({ y: window.scrollY, vv: window.visualViewport?.pageTop, lastBottom: Math.round(document.querySelectorAll(".app-scroll .card:last-of-type")[0]?.getBoundingClientRect().bottom ?? -1), scroller: (() => { const el = document.scrollingElement; return el ? { tag: el.tagName, sh: el.scrollHeight, ch: el.clientHeight } : null; })() }));
+console.log(JSON.stringify({ before, afterWheel, afterScrollTo }, null, 2));
+await b.close();

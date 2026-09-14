@@ -146,7 +146,7 @@ export function diffDailyLog(
 
   // 补剂单独比较
   const sup = patch.supplements;
-  const supLabels: [keyof NonNullable<DailyLog['supplements']>, string, string][] = [
+  const supLabels: ['proteinG' | 'proteinScoops' | 'creatineG', string, string][] = [
     ['proteinG', '蛋白粉摄入', 'g'],
     ['proteinScoops', '蛋白粉勺数', '勺'],
     ['creatineG', '肌酸', 'g'],
@@ -163,18 +163,20 @@ export function diffDailyLog(
     }
   }
 
+  const identical = existing != null && creates.length === 0 && updates.length === 0;
   const conflicts: string[] = [];
-  if (existing?.summaryId && existing.summaryId === draft.importId) {
-    conflicts.push('这一天的总结已经由同一份 PDF 导入过，重复保存会产生冗余记录。');
-  }
   if (ctx.duplicateImport) {
     conflicts.push('这份 PDF 之前已经导入过（文件名与大小一致），请确认不是重复操作。');
   }
-  if (ctx.hasTrainingSummary) {
-    conflicts.push('当天已有一次 App 内训练记录，合并后会与训练报告共同存在（不会删除训练报告）。');
-  }
-  if (!conflicts.length && existing && creates.length === 0 && updates.length === 0) {
+  if (identical) {
     conflicts.push('与已有记录完全一致，无需重复保存。');
+  } else {
+    if (existing?.summaryId && existing.summaryId === draft.importId) {
+      conflicts.push('这一天的总结已经由同一份 PDF 导入过，重复保存会产生冗余记录。');
+    }
+    if (ctx.hasTrainingSummary) {
+      conflicts.push('当天已有一次 App 内训练记录，合并后会与训练报告共同存在（不会删除训练报告）。');
+    }
   }
 
   return { creates, updates, unchanged, conflicts, targetId: existing?.id ?? draft.date, payload: patch };

@@ -2,9 +2,9 @@
 import type { SummaryDraft } from '../../types';
 import { cleanLines, firstNumber, matchLabel, normalizeText, parseDateLoose } from './text';
 
-function findLabelValue(lines: string[], labels: string[]): string | null {
+function findLabelValue(lines: string[], labels: string[], mode: 'value' | 'rest' = 'rest'): string | null {
   for (const line of lines) {
-    const hit = matchLabel(line, labels);
+    const hit = matchLabel(line, labels, mode);
     if (hit) return hit.value;
   }
   return null;
@@ -13,10 +13,16 @@ function findLabelValue(lines: string[], labels: string[]): string | null {
 function numberFrom(lines: string[], labels: string[], pattern?: RegExp): number | null {
   for (const line of lines) {
     const hit = matchLabel(line, labels);
-    const source = hit?.value ?? line;
-    if (pattern && !pattern.test(source)) continue;
-    const n = firstNumber(source);
+    if (!hit) continue;
+    const n = firstNumber(hit.value);
     if (n != null) return n;
+  }
+  if (pattern) {
+    for (const line of lines) {
+      if (!pattern.test(line)) continue;
+      const n = firstNumber(line);
+      if (n != null) return n;
+    }
   }
   return null;
 }
@@ -25,11 +31,14 @@ function numberFrom(lines: string[], labels: string[], pattern?: RegExp): number
 function parseVolume(lines: string[]): number | null {
   for (const line of lines) {
     const hit = matchLabel(line, ['训练量', '训练容量', '总容量', '总训练量', '容量', 'volume']);
-    const source = hit?.value ?? line;
+    if (!hit) continue;
+    const source = hit.value;
     const ton = source.match(/(\d+(?:\.\d+)?)\s*(?:吨|t\b)/i);
-    if (ton && /训练量|容量|volume|吨/i.test(line)) return Math.round(Number(ton[1]) * 1000);
-    const kg = source.match(/(\d[\d,]{1,7}(?:\.\d+)?)\s*(?:kg|公斤|千克)/i);
-    if (kg && /训练量|容量|volume|kg|公斤/i.test(line)) return Math.round(Number(kg[1].replace(/,/g, '')));
+    if (ton) return Math.round(Number(ton[1]) * 1000);
+    const kg = source.match(/(\d[\d,]*(?:\.\d+)?)\s*(?:kg|公斤|千克)/i);
+    if (kg) return Math.round(Number(kg[1].replace(/,/g, '')));
+    const bare = source.match(/(\d[\d,]{2,7})/);
+    if (bare) return Number(bare[1].replace(/,/g, ''));
   }
   return null;
 }
@@ -60,7 +69,7 @@ export function parseSummaryText(
   const trainingVolumeKg = parseVolume(lines);
 
   // 训练内容：优先「训练内容」标签，否则收集出现组次/动作关键词的行
-  const contentHit = findLabelValue(lines, ['训练内容', '今日训练', '训练项目', '完成情况']);
+  const contentHit = findLabelValue(lines, ['训练内容', '今日训练内容', '训练项目', '完成情况']);
   const contentLines = lines.filter(
     (l) =>
       !contentHit &&

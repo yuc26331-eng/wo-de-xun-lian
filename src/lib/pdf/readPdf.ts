@@ -48,7 +48,6 @@ export async function readPdfFile(
     doc = await pdfjs.getDocument({
       data,
       // 手机上避免一次性解析过多内容
-      isEvalSupported: false,
       useSystemFonts: false,
     }).promise;
   } catch (err) {
@@ -80,7 +79,8 @@ export async function readPdfFile(
       onProgress?.(i / doc.numPages);
     }
   } finally {
-    void doc.destroy();
+    const destroy = (doc as unknown as { destroy?: () => Promise<void> }).destroy;
+    if (destroy) void destroy.call(doc);
   }
 
   const text = pages.join('\n');

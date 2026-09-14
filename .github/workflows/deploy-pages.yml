@@ -12,7 +12,7 @@ permissions:
 
 concurrency:
   group: pages
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   build:
@@ -26,19 +26,19 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
           cache: pnpm
 
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+      - name: 安装依赖
+        run: pnpm install --no-frozen-lockfile
 
-      - name: Type check
+      - name: 类型检查
         run: pnpm typecheck
 
-      - name: Unit tests
+      - name: 单元测试
         run: pnpm test
 
-      - name: Build (GitHub Pages 子路径)
+      - name: 构建（GitHub Pages 子路径）
         run: pnpm build
         env:
           VITE_BASE: /${{ github.event.repository.name }}/

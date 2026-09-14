@@ -53,8 +53,8 @@ export function itemsToLines(items: TextItemLike[]): string[] {
         if (prevEnd != null) {
           const gap = p.x - prevEnd;
           const charW = p.width > 0 && p.str.length > 0 ? p.width / p.str.length : 6;
-          // 明显断开时补空格，接近连续时不补
-          if (gap > charW * 0.9 && needsSpace(text, p.str)) text += ' ';
+          // 有可见空隙且两侧都是英文/数字时补空格；中文之间不补
+          if (gap > charW * 0.35 && needsSpace(text, p.str)) text += ' ';
         }
         text += p.str;
         prevEnd = p.x + p.width;

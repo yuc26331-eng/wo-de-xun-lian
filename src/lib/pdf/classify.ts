@@ -6,29 +6,33 @@ interface Rule {
   kind: PdfKind;
   weight: number;
   test: RegExp;
+  /** true 表示只要命中就基本确定类型 */
+  strong?: boolean;
 }
 
 const RULES: Rule[] = [
-  // 周训练计划
-  { kind: 'weekly-plan', weight: 3, test: /周训练计划|本周训练|一周训练|训练周计划|周计划/ },
-  { kind: 'weekly-plan', weight: 1, test: /(周一|周二|周三|周四|周五|周六|周日)[^\n]{0,20}(训练|休息|力量|有氧)/g },
+  // 强特征：标题里写明了类型
+  { kind: 'weekly-plan', weight: 6, strong: true, test: /周(训练)?计划|本周训练|一周训练周?计划|训练周期安排/ },
+  { kind: 'daily-summary', weight: 6, strong: true, test: /(今日)?(训练)?(总结|复盘|日志)|daily\s*summary/i },
+  { kind: 'body-report', weight: 6, strong: true, test: /身体(数据|成分)报告|体测报告|体质报告|inbody|体脂率报告/i },
+  { kind: 'plan', weight: 5, strong: true, test: /(训练|健身|今日|本周|力量|有氧)?(训练)?计划|训练安排|训练课表|课表/ },
+
+  // 软特征：内容里出现的字段
+  { kind: 'weekly-plan', weight: 1.5, test: /(周一|周二|周三|周四|周五|周六|周日)[^\n]{0,24}(训练|休息|力量|有氧|跑)/g },
   { kind: 'weekly-plan', weight: 1, test: /day\s*[1-7]\b/gi },
 
-  // 今日总结
-  { kind: 'daily-summary', weight: 3, test: /今日(训练)?总结|训练总结|今日复盘|训练日志|daily\s*summary/i },
-  { kind: 'daily-summary', weight: 2, test: /(今日)?(感受|状态|疲劳|睡眠|饮食|补剂|疼痛|不适)[:：]/g },
-  { kind: 'daily-summary', weight: 2, test: /训练量|训练容量|总容量|volume/i },
+  { kind: 'daily-summary', weight: 1.2, test: /(感受|疲劳|睡眠|饮食|补剂|疼痛|不适)\s*[:：]/g },
+  { kind: 'daily-summary', weight: 1.5, test: /训练量|训练容量|总容量|volume/i },
+  { kind: 'daily-summary', weight: 1, test: /状态不错|感觉|复盘/g },
 
-  // 身体数据报告
-  { kind: 'body-report', weight: 3, test: /身体数据|体测|inbody|体质报告|身体成分|体脂率报告/i },
-  { kind: 'body-report', weight: 2, test: /体脂(率)?[:：]?\s*\d/i },
-  { kind: 'body-report', weight: 1, test: /(体重|骨骼肌|基础代谢|内脏脂肪|bmi)/gi },
+  { kind: 'body-report', weight: 1.5, test: /体脂(率)?\s*[:：]?\s*\d/i },
+  { kind: 'body-report', weight: 1, test: /(骨骼肌|基础代谢|内脏脂肪|bmi)/gi },
 
-  // 健身计划
-  { kind: 'plan', weight: 3, test: /训练计划|健身计划|今日训练|训练安排|训练课表/ },
-  { kind: 'plan', weight: 2, test: /\d+\s*组\s*[x×*]\s*\d+|组数[:：]|次数[:：]|组间休息/ },
-  { kind: 'plan', weight: 2, test: /热身|拉伸|准备活动/ },
-  { kind: 'plan', weight: 1, test: /rpe|rm\b|配速|心率/i },
+  { kind: 'plan', weight: 1.4, test: /\d{1,2}\s*组\s*[x×*]\s*\d+|组数\s*[:：]|次数\s*[:：]|组间休息/g },
+  { kind: 'plan', weight: 1.6, test: /\|\s*(动作|名称|项目)\s*\|/g },
+  { kind: 'plan', weight: 1.2, test: /\|\s*(组数|次数|重量|休息)\s*\|/g },
+  { kind: 'plan', weight: 1.2, test: /热身|拉伸|准备活动|冷身/g },
+  { kind: 'plan', weight: 0.8, test: /rpe|rm\b|配速|心率/gi },
 ];
 
 export interface ClassifyResult {
@@ -47,6 +51,7 @@ export function classifyPdf(text: string, fileName = ''): ClassifyResult {
     'body-report': 0,
     unknown: 0,
   };
+  let strongKind: PdfKind | null = null;
 
   for (const rule of RULES) {
     const re = new RegExp(rule.test.source, rule.test.flags.includes('g') ? 'gi' : 'i');
@@ -54,6 +59,7 @@ export function classifyPdf(text: string, fileName = ''): ClassifyResult {
     if (matches?.length) {
       const times = rule.test.flags.includes('g') ? Math.min(matches.length, 3) : 1;
       scores[rule.kind] += rule.weight * times;
+      if (rule.strong && !strongKind) strongKind = rule.kind;
     }
   }
 
@@ -65,10 +71,17 @@ export function classifyPdf(text: string, fileName = ''): ClassifyResult {
   if (/计划|plan|program/.test(name)) scores.plan += 3;
 
   const entries = (Object.keys(scores) as PdfKind[]).filter((k) => k !== 'unknown');
-  const best = entries.reduce((a, b) => (scores[b] > scores[a] ? b : a), 'unknown' as PdfKind);
-  const bestScore = scores[best];
+  const bestByScore = entries.reduce((a, b) => (scores[b] > scores[a] ? b : a), 'unknown' as PdfKind);
   const total = entries.reduce((sum, k) => sum + scores[k], 0);
 
-  if (bestScore < 2) return { kind: 'unknown', scores, confidence: 0 };
-  return { kind: best, scores, confidence: total > 0 ? Math.min(1, bestScore / total + 0.15) : 0 };
+  // 命中强特征时以强特征为准（标题优先级：周计划 > 总结 > 身体报告 > 计划）
+  const kind = strongKind ?? bestByScore;
+  if (kind === 'unknown' || (scores[kind] < 2 && !strongKind)) {
+    return { kind: 'unknown', scores, confidence: 0 };
+  }
+  return {
+    kind,
+    scores,
+    confidence: total > 0 ? Math.min(1, Math.max(0.45, scores[kind] / total + 0.2)) : 0.4,
+  };
 }

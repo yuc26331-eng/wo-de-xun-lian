@@ -13,7 +13,7 @@ const FULLWIDTH_MAP: Record<string, string> = {
   'ａ': 'a', 'ｂ': 'b', 'ｃ': 'c', 'ｄ': 'd', 'ｅ': 'e',
   '．': '.', '％': '%', '（': '(', '）': ')', '［': '[', '］': ']',
   'ｘ': 'x', 'Ｘ': 'X', '∶': ':', '：': ':', '，': ',',
-  '；': ';', '！': '!', '？': '?', '、': ',', '～': '~',
+  '；': ';', '！': '!', '？': '?', '～': '~',
   '／': '/', '＋': '+', '－': '-', '＝': '=', '＠': '@',
   '　': ' ',
 };
@@ -28,11 +28,11 @@ export function normalizeText(input: string): string {
     .replace(/[ \t]+\n/g, '\n');
 }
 
-/** 逐行清洗：去空白、去页码、去页眉页脚噪声 */
+/** 逐行清洗：去空白、去页码、去页眉页脚噪声（保留 | 以便识别表格） */
 export function cleanLines(input: string): string[] {
   const lines = normalizeText(input)
     .split(/\r?\n/)
-    .map((l) => l.replace(/^[\s|]+|[\s|]+$/g, '').trim())
+    .map((l) => l.trim())
     .filter((l) => l.length > 0)
     .filter((l) => !/^第?\s*\d+\s*页(\s*[/·]\s*共?\s*\d+\s*页)?$/.test(l))
     .filter((l) => !/^page\s*\d+(\s*(of|\/)\s*\d+)?$/i.test(l))
@@ -112,15 +112,34 @@ export interface LabelHit {
   label: string;
 }
 
-/** 在一行里找 '标签: 值' 结构，支持中英文冒号与多种标签写法 */
-export function matchLabel(line: string, labels: string[]): LabelHit | null {
+function escapeRe(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * 在一行里找「标签: 值」结构。
+ * - 支持 `体重：72kg`、`体重 72kg`、`体重为72kg`、`| 体重 | 72 |`
+ * - mode: 'value'（默认，短值，遇到逗号停止）/ 'rest'（取到行尾，用于训练内容、饮食等长文本）
+ */
+export function matchLabel(
+  line: string,
+  labels: string[],
+  mode: 'value' | 'rest' = 'value',
+): LabelHit | null {
   const t = normalizeText(line).replace(/^[-*•·\d.、)）\s]+/, '');
+  const value = mode === 'rest' ? '(.{1,800})' : '([^|,;；]{1,140})';
   for (const label of labels) {
-    const re = new RegExp(
-      `(?:^|[|\\s,])${label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*(?:[:：=]|为|是)\\s*([^|,，;；]{1,120})`,
+    const esc = escapeRe(label);
+    const flags = /^[\x20-\x7e]+$/.test(label) ? 'i' : '';
+    const m = t.match(
+      new RegExp(`(?:^|[|\\s,])${esc}\\s*(?:[:：=]|为|是)\\s*${value}`, flags),
     );
-    const m = t.match(re);
     if (m && m[1].trim()) return { value: m[1].trim(), label };
+    // 没有冒号、只有空格分隔时，仅当后面紧跟数字才认为命中（'体重 72.8kg'）
+    const m2 = t.match(
+      new RegExp(`(?:^|[|\\s,])${esc}\\s+(?=[\\d.\\-+])${value}`, flags),
+    );
+    if (m2 && m2[1].trim()) return { value: m2[1].trim(), label };
   }
   return null;
 }
@@ -128,6 +147,9 @@ export function matchLabel(line: string, labels: string[]): LabelHit | null {
 /** 去掉 '1. '、'①'、'- '、'* ' 等序号/项目符号 */
 export function stripBullet(line: string): { text: string; index: number | null } {
   const t = normalizeText(line);
+  // 「4 组 × 5 次」这类以数字开头的字段行不是序号，不能剥离
+  const unitAfterNumber = /^\d{1,3}\s*(组|次|kg|公斤|秒|分钟|分|%|公里|米|\/|x|×|\*)/i.test(t);
+  if (unitAfterNumber) return { text: t.trim(), index: null };
   const num = t.match(/^\(?(\d{1,2})\)?\s*[.、)）:：]?\s+(?=\S)/);
   if (num) return { text: t.slice(num[0].length).trim(), index: Number(num[1]) };
   const circled = t.match(/^([①-⑳])\s*/);
@@ -144,18 +166,28 @@ export function stripBullet(line: string): { text: string; index: number | null 
   return { text: t.trim(), index: null };
 }
 
-/** 判断一行是否像小节标题（短、无数字组次信息） */
-export function isHeading(line: string, keywords: string[]): boolean {
-  const t = normalizeText(line).replace(/^[#*\s]+/, '').replace(/[:：]\s*$/, '').trim();
-  if (t.length === 0 || t.length > 16) return false;
-  if (/\d+\s*(组|次|kg|公斤)/.test(t)) return false;
+/**
+ * 判断一行是否像小节标题：
+ * 很短、没有冒号/逗号（排除「要领：xxx」这类字段行）、不含组次重量信息
+ */
+export function isHeading(line: string, keywords: string[], maxLen = 12): boolean {
+  const raw = normalizeText(line).replace(/^[#*\s]+/, '').trim();
+  if (raw.includes(':') || raw.includes(',') || raw.includes('|')) return false;
+  const t = raw
+    .replace(/^[一二三四五六七八九十\d]+\s*[、.)）]\s*/, '')
+    .replace(/[（(][^）)]*[）)]\s*$/, '')
+    .trim();
+  if (t.length === 0 || t.length > maxLen) return false;
+  if (/\d+\s*(组|次|kg|公斤|秒|分钟)/i.test(t)) return false;
+  if (/\d{2,}/.test(t)) return false;
   return keywords.some((k) => t.includes(k));
 }
 
 /** 把 markdown 表格行拆成单元格 */
 export function tableCells(line: string): string[] | null {
   const t = line.trim();
-  if (!t.startsWith('|')) return null;
+  const pipes = (t.match(/\|/g) ?? []).length;
+  if (pipes < 2 && !t.startsWith('|')) return null;
   const cells = t
     .replace(/^\|/, '')
     .replace(/\|$/, '')

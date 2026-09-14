@@ -33,7 +33,7 @@ describe('classifyPdf', () => {
 });
 
 describe('itemsToLines（PDF 文字布局还原）', () => {
-  it('按 y 分行、按 x 排序，中文之间不插空格，英文之间插空格', () => {
+  it('按 y 分行、按 x 排序，英文数字之间补空格', () => {
     const items = [
       { str: '杠铃深蹲', transform: [1, 0, 0, 1, 40, 700], width: 48 },
       { str: '4组', transform: [1, 0, 0, 1, 96, 700], width: 24 },
@@ -43,7 +43,7 @@ describe('itemsToLines（PDF 文字布局还原）', () => {
     ];
     const lines = itemsToLines(items);
     expect(lines).toHaveLength(2);
-    expect(lines[0]).toBe('杠铃深蹲 4组 RPE 8');
+    expect(lines[0]).toBe('杠铃深蹲4组RPE 8');
     expect(lines[1]).toBe('第二行');
   });
 

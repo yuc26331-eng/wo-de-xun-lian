@@ -26,11 +26,15 @@ function todayISO(): ISODate {
 
 function valueByLabels(line: string, labels: string[], unitRe: RegExp): number | null {
   const hit = matchLabel(line, labels);
-  const source = hit?.value ?? line;
-  const withUnit = source.match(unitRe);
-  if (withUnit) return Number(withUnit[1]);
-  if (hit) return firstNumber(source);
-  return null;
+  if (hit) {
+    const inHit = hit.value.match(unitRe);
+    if (inHit) return Number(inHit[1]);
+    const n = firstNumber(hit.value);
+    if (n != null) return n;
+  }
+  // 标签后没有分隔符时，退化为「整行里找带单位的数字」
+  const loose = line.match(unitRe);
+  return loose ? Number(loose[1]) : null;
 }
 
 export function parseBodyReportText(

@@ -76,8 +76,6 @@ html,
 body {
   margin: 0;
   padding: 0;
-  height: 100%;
-  overflow-x: hidden;
   background: var(--bg);
   color: var(--text);
   font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'PingFang SC',
@@ -89,8 +87,16 @@ body {
   overscroll-behavior-y: none;
 }
 
+/* 让窗口本身成为滚动容器：iOS Safari 上手感最自然，window.scrollY / scroll 事件也才有效 */
+html {
+  height: auto;
+  overflow-x: hidden;
+}
+
 body {
+  height: auto;
   min-height: 100dvh;
+  overflow-x: hidden;
 }
 
 #root {

@@ -116,7 +116,9 @@ export function parseTargetFromText(text: string): TargetSpec {
   if (tempo) target.tempo = tempo[1].replace(/\s/g, '');
 
   // 时间型（平板支撑、静蹲、有氧时长）
-  const dur = t.match(/(?:时间|时长|持续|坚持|每组)\s*[:：]?\s*(\d{1,3}(?:\.\d+)?)\s*(秒|分钟|分|s\b|min)/i);
+  const dur =
+    t.match(/[x×*]\s*(\d{1,3}(?:\.\d+)?)\s*(秒|分钟|分|s\b|min)/i) ??
+    t.match(/(?:时间|时长|持续|坚持|每组)\s*[:：]?\s*(\d{1,3}(?:\.\d+)?)\s*(秒|分钟|分|s\b|min)/i);
   if (dur) {
     const unit = dur[2];
     const n = Number(dur[1]);
@@ -276,17 +278,23 @@ function exerciseFromBlock(block: Block, order: number, fallback: SessionKind): 
       else if (w.weightText) target.weightText = w.weightText;
     }
     if (restCell) {
-      const r = parseTargetFromText(restCell);
-      if (r.restSec != null) target.restSec = r.restSec;
+      const min = restCell.match(/(\d{1,3}(?:\.\d+)?)\s*(?:分钟|分|min|m\b)/i);
+      const sec = restCell.match(/(\d{1,3}(?:\.\d+)?)\s*(?:秒|s\b|sec)/i);
+      const bare = restCell.match(/^(\d{1,3})$/);
+      if (min) target.restSec = Math.round(Number(min[1]) * 60);
+      else if (sec) target.restSec = Math.round(Number(sec[1]));
+      else if (bare) target.restSec = Number(bare[1]);
     }
     if (rpeCell) {
       const r = parseTargetFromText(rpeCell);
+      const bare = rpeCell.trim().match(/^(\d{1,2}(?:\.\d+)?)/);
       if (r.rpe != null) target.rpe = r.rpe;
+      else if (bare) target.rpe = Number(bare[1]);
     }
   }
 
   const cue = textFromLabel(block, CUE_LABELS) ?? looseCueLines(block)[0];
-  const notes = textFromLabel(block, NOTE_LABELS) ?? looseCueLines(block).slice(1).join('；') || undefined;
+  const notes = textFromLabel(block, NOTE_LABELS) ?? (looseCueLines(block).slice(1).join('；') || undefined);
 
   if (
     target.sets == null &&
@@ -312,12 +320,14 @@ function exerciseFromBlock(block: Block, order: number, fallback: SessionKind): 
 
 function parseWarmupLines(lines: string[]): WarmupItem[] {
   const items: WarmupItem[] = [];
+  const WARMUP_CUT =
+    /(\d{1,3}\s*组|\d{1,3}\s*[x×*]\s*\d|@\s*\d|\d{1,3}\s*(?:kg|公斤|秒|分钟|分|米|公里)|心率|距离|配速|速度|时间\s*[:：])/i;
   for (const raw of lines) {
     const { text } = stripBullet(raw);
     if (!text) continue;
     const cells = tableCells(raw);
     const content = cells ? cells.join(' ') : text;
-    const cut = content.search(FIELD_CUT);
+    const cut = content.search(WARMUP_CUT);
     let name = cut > 0 ? content.slice(0, cut) : content;
     const t = parseTargetFromText(content);
     const durationSec =
@@ -422,6 +432,13 @@ export function parsePlanBody(text: string, opts: ParsePlanOptions): PlanBody {
     cooldown: [],
     notes: [],
   };
+  const looksLikeExerciseLine = (line: string): boolean =>
+    tableCells(line) !== null ||
+    /\d{1,2}\s*组|[x×*]\s*\d{1,3}|\d+\s*(?:kg|公斤)|@\s*\d|组间休息|\d+\s*秒/.test(
+      normalizeText(line),
+    );
+  const META_LABELS = ['日期', '计划日期', '预计训练时间', '预计时长', '总时长', '训练时长', '计划名称', '地点', '教练', '训练目标'];
+
   let current: Section = 'meta';
   for (const line of lines) {
     if (isHeading(line, WARMUP_HEADINGS)) {
@@ -436,15 +453,29 @@ export function parsePlanBody(text: string, opts: ParsePlanOptions): PlanBody {
       current = 'cooldown';
       continue;
     }
-    if (isHeading(line, MAIN_HEADINGS)) {
+    if (isHeading(line, MAIN_HEADINGS, 9)) {
       current = 'main';
       continue;
     }
+    if (current === 'meta' && matchLabel(line, META_LABELS, 'rest')) {
+      sections.meta.push(line);
+      continue;
+    }
+    // 「备注：…」这类行归到计划备注，而不是当成动作要领
+    const planNoteLabels = current === 'main' ? ['备注', '教练备注'] : ['备注', '注意事项', '说明', '提示', '教练备注'];
+    const noteHit = current !== 'notes' ? matchLabel(line, planNoteLabels, 'rest') : null;
+    if (noteHit) {
+      sections.notes.push(`${noteHit.label}：${noteHit.value}`);
+      continue;
+    }
+    if (current === 'meta' && looksLikeExerciseLine(line)) current = 'main';
     sections[current].push(line);
   }
 
   const metaLines = sections.meta;
-  const dateHit = metaLines.map((l) => parseDateLoose(l)).find((d) => d) ?? parseDateLoose(opts.fileName ?? '');
+  const dateHit =
+    [...metaLines, ...lines.slice(0, 8)].map((l) => parseDateLoose(l)).find((d) => d) ??
+    parseDateLoose(opts.fileName ?? '');
   const title = guessTitle(lines, opts.fileName);
   const estimatedMinutes = guessMinutes(lines);
 

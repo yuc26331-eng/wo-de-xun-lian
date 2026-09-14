@@ -263,6 +263,11 @@ export default function LiveWorkoutPage() {
     return rows.length ? rows[rows.length - 1].weightKg ?? null : null;
   }, [bodyMetrics]);
 
+  /** 当前动作可以收尾（所有组完成 / 已标记完成 / 已经没有待完成动作） */
+  const showPrimaryFinish = allSetsDone || exercise?.status === 'done' || pendingCount === 0;
+  /** 收尾后整个训练就结束了 */
+  const finishEverything = lastEx || remainingOthers === 0;
+
   useEffect(() => {
     setEditor(editorFromSet(pendingSet));
   }, [pendingSet?.id]);
@@ -869,19 +874,15 @@ export default function LiveWorkoutPage() {
       {!paused && restLeft <= 0 && (
         <div className="focus-bottom">
           <div className="focus-bottom-inner">
-            {allSetsDone || exercise.status === 'done' ? (
+            {showPrimaryFinish ? (
               <Button
                 block
                 variant="success"
                 size="xl"
                 onClick={onFinishExercise}
-                data-testid={
-                  lastEx || remainingOthers === 0 ? 'live-finish-session' : 'live-finish-exercise'
-                }
+                data-testid={finishEverything ? 'live-finish-session' : 'live-finish-exercise'}
               >
-                {lastEx || remainingOthers === 0
-                  ? '完成训练并生成总结'
-                  : '完成本动作并进入下一项'}
+                {finishEverything ? '完成训练并生成总结' : '完成本动作并进入下一项'}
               </Button>
             ) : (
               <Button

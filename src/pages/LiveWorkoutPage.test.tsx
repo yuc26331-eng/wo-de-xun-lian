@@ -145,7 +145,12 @@ describe('LiveWorkoutPage', () => {
       expect(screen.getByTestId('live-progress').textContent).toContain('动作 6/6'),
     );
 
-    // 其余动作都已跳过 → 直接提供「完成训练并生成总结」
+    // 最后一个动作（平板支撑 3 组）完成后，直接给出「完成训练并生成总结」
+    for (let i = 0; i < 3; i += 1) {
+      await user.click(await screen.findByTestId('live-complete-set'));
+      const skip = screen.queryByTestId('live-rest-skip');
+      if (skip) await user.click(skip);
+    }
     const finish = await screen.findByTestId('live-finish-session', {}, { timeout: 4000 });
     await user.click(finish);
     await screen.findByTestId('live-finish-confirm', {}, { timeout: 4000 });
