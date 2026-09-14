@@ -60,6 +60,16 @@ const KIND_TEXT: Record<SessionKind, string> = SESSION_KIND_LABEL;
  * 数字与常见中文标点都完整保留。
  */
 export function sanitizeForPdf(input: string): string {
+  // 字体里没有的字形先映射到等价字符，避免出现方块
+  const map: Record<string, string> = {
+    '✗': '×',
+    '✘': '×',
+    '✔': '✓',
+    '✅': '✓',
+    '❌': '×',
+    '～': '~',
+    '—': '—',
+  };
   let out = '';
   for (const ch of String(input ?? '')) {
     const code = ch.codePointAt(0) ?? 0;
@@ -67,7 +77,7 @@ export function sanitizeForPdf(input: string): string {
     if (code >= 0x1f000) continue;
     if (code >= 0x2600 && code <= 0x27bf) continue;
     if (code === 0xfe0f || code === 0x200d) continue;
-    out += ch;
+    out += map[ch] ?? ch;
   }
   return out;
 }

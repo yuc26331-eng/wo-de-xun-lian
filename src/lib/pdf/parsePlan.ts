@@ -12,6 +12,7 @@ import type {
 } from '../../types';
 import {
   cleanLines,
+  firstNumber,
   isHeading,
   matchLabel,
   normalizeText,
@@ -38,6 +39,10 @@ interface Block {
   head: string;
   lines: string[];
   fromTable?: boolean;
+  /** 表格行的单元格 */
+  cells?: string[];
+  /** 该表格的表头（用于按列取数） */
+  header?: string[];
 }
 
 const RUN_RE = /跑|冲刺|慢跑|间歇|百米|折返跑/;
@@ -156,6 +161,7 @@ function splitExerciseBlocks(lines: string[]): Block[] {
   const blocks: Block[] = [];
   let current: Block | null = null;
   let fieldSeen = false;
+  let tableHeader: string[] | null = null;
 
   const push = () => {
     if (current && (current.head.trim() || current.lines.length)) blocks.push(current);
@@ -166,10 +172,24 @@ function splitExerciseBlocks(lines: string[]): Block[] {
   for (const raw of lines) {
     const cells = tableCells(raw);
     if (cells) {
+      const isHeaderRow =
+        /动作|名称|项目|练习|exercise/i.test(cells[0]) ||
+        cells.some((c) => /^(组数|次数|重量|休息|间歇|rpe|sets|reps|weight|rest)$/i.test(c.trim()));
+      if (isHeaderRow && !/\d/.test(cells.join(''))) {
+        tableHeader = cells;
+        push();
+        continue;
+      }
       push();
       const name = cells[0].replace(/^(动作|名称|项目)\s*[:：]?/, '').trim();
       if (name && !/^动作$|^名称$|^项目$/.test(name)) {
-        blocks.push({ head: name, lines: [cells.slice(1).join(' | ')], fromTable: true });
+        blocks.push({
+          head: name,
+          lines: [cells.slice(1).join(' | ')],
+          fromTable: true,
+          cells,
+          header: tableHeader ?? undefined,
+        });
       }
       continue;
     }
@@ -233,15 +253,35 @@ function exerciseFromBlock(block: Block, order: number, fallback: SessionKind): 
 
   const comboText = [block.head, ...block.lines].join(' | ');
   const target = parseTargetFromText(comboText);
-  if (block.fromTable) {
-    const cells = block.lines[0]?.split('|').map((c) => c.trim()) ?? [];
-    for (const cell of cells) {
-      const partial = parseTargetFromText(cell);
-      target.sets = target.sets ?? partial.sets ?? null;
-      target.reps = target.reps ?? partial.reps ?? null;
-      target.weightKg = target.weightKg ?? partial.weightKg ?? null;
-      target.restSec = target.restSec ?? partial.restSec ?? null;
-      target.rpe = target.rpe ?? partial.rpe ?? null;
+
+  // 表格：按表头列名取数（比正则更可靠）
+  if (block.cells && block.header) {
+    const header = block.header;
+    const cells = block.cells;
+    const cellOf = (names: string[]): string => {
+      const i = header.findIndex((h) => names.some((n) => h.toLowerCase().includes(n)));
+      return i >= 0 && i < cells.length ? cells[i] : '';
+    };
+    const setsCell = cellOf(['组数', '组', 'sets']);
+    const repsCell = cellOf(['次数', '次', 'reps']);
+    const weightCell = cellOf(['重量', '负荷', '负重', 'weight', 'kg']);
+    const restCell = cellOf(['休息', '间歇', 'rest']);
+    const rpeCell = cellOf(['rpe', '强度']);
+    const setsNum = setsCell ? firstNumber(setsCell) : null;
+    if (setsNum != null) target.sets = setsNum;
+    if (repsCell) target.reps = repsCell.replace(/[^\d\-–~力竭amrap]/gi, '') || target.reps;
+    if (weightCell) {
+      const w = parseTargetFromText(weightCell);
+      if (w.weightKg != null) target.weightKg = w.weightKg;
+      else if (w.weightText) target.weightText = w.weightText;
+    }
+    if (restCell) {
+      const r = parseTargetFromText(restCell);
+      if (r.restSec != null) target.restSec = r.restSec;
+    }
+    if (rpeCell) {
+      const r = parseTargetFromText(rpeCell);
+      if (r.rpe != null) target.rpe = r.rpe;
     }
   }
 
@@ -430,7 +470,7 @@ export function parsePlanBody(text: string, opts: ParsePlanOptions): PlanBody {
 
   // 4. 拉伸 / 恢复 / 备注
   const cooldown = sections.cooldown.join('\n').trim();
-  const notes = [sections.notes.join('\n').trim(), sections.cooldown.length ? '' : ''].filter(Boolean).join('\n');
+  const notes = sections.notes.join('\n').trim();
 
   // 5. 置信度与提示
   let score = 0;
@@ -499,9 +539,8 @@ export function parseWeeklyPlanBody(
     const dayMatch = t.match(DAY_RE);
     if (dayMatch) {
       if (current) groups.push(current);
-      const date = parseDateLoose(t);
       const label = t.slice(0, 22).replace(/[:：\s]+$/, '');
-      current = { title: label, lines: date ? [t] : [t] };
+      current = { title: label, lines: [t] };
       continue;
     }
     if (current) current.lines.push(line);

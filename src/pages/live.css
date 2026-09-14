@@ -79,6 +79,27 @@
   margin: 0;
 }
 
+/* 跑步 / 骑行 / 足球各自独立的记录卡片 */
+.lw-cardio-head {
+  grid-column: 1 / -1;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--accent);
+  letter-spacing: 0.02em;
+  padding-bottom: 2px;
+  border-bottom: 1px solid var(--sep);
+  margin-bottom: 2px;
+}
+
+.lw-cardio-hint {
+  grid-column: 1 / -1;
+  font-size: 13px;
+  color: var(--muted);
+  background: var(--card-2, rgba(120, 120, 128, 0.12));
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+}
+
 .lw-done-hint {
   display: flex;
   align-items: center;
@@ -116,8 +137,9 @@
 }
 
 .lw-history-row .link {
-  min-height: 32px;
-  padding: 0 8px;
+  min-height: 44px;
+  min-width: 52px;
+  padding: 0 10px;
 }
 
 /* 单手操作：底部一排操作按钮，触控目标 ≥44px */
@@ -206,4 +228,18 @@
 .focus .btn.xl {
   min-height: 60px;
   font-size: 18px;
+}
+
+/* 疼痛部位等可点标签同样满足 44px 触控目标（仅限弹层内的可点击标签） */
+.focus .chip.pain-chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 0 14px;
+  font-size: 15px;
+  border: 1px solid var(--sep);
+}
+
+.focus .chip.pain-chip.accent {
+  border-color: transparent;
 }

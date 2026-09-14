@@ -1,0 +1,11 @@
+import fs from 'node:fs';
+import { PDFDocument, rgb } from 'pdf-lib';
+import fontkit from '@pdf-lib/fontkit';
+const [fontPath, outPath, subsetFlag] = process.argv.slice(2);
+const doc = await PDFDocument.create();
+doc.registerFontkit(fontkit);
+const font = await doc.embedFont(fs.readFileSync(fontPath), { subset: subsetFlag === 'true' });
+const page = doc.addPage([595.28, 841.89]);
+page.drawText('我的训练 中文 PDF 导出测试：深蹲 90kg × 5 次，RPE 8', { x: 30, y: 780, size: 13, font, color: rgb(0,0,0) });
+fs.writeFileSync(outPath, await doc.save());
+console.log('ok', outPath, fs.statSync(outPath).size);

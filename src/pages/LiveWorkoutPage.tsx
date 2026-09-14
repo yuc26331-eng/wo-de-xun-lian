@@ -42,6 +42,7 @@ import {
   formatDurationCN,
   formatMinSec,
   formatNumber,
+  formatPace,
   kindIsCardio,
   toISODate,
 } from '../lib/format';
@@ -69,6 +70,7 @@ import {
   removeSet,
   restRemainingSec,
   resumeSession,
+  SESSION_KIND_SHORT,
   sessionProgress,
   setOverride,
   skipExercise,
@@ -244,7 +246,18 @@ export default function LiveWorkoutPage() {
   const allSetsDone = exercise ? doneSetCount(exercise) >= exercise.sets.length : false;
   const paused = view?.status === 'paused';
   const lastEx = progress ? progress.index >= progress.total - 1 : false;
-  const pendingCount = view ? view.exercises.filter((ex) => !isExerciseComplete(ex)).length : 0;
+  const pendingCount = view
+    ? view.exercises.filter((ex) => !isExerciseComplete(ex) && ex.status !== 'skipped').length
+    : 0;
+  /** 除了当前动作之外，还有没有需要完成的动作（已跳过的动作不算） */
+  const remainingOthers = view && exercise
+    ? view.exercises.filter(
+        (ex) =>
+          ex.exerciseId !== exercise.exerciseId &&
+          !isExerciseComplete(ex) &&
+          ex.status !== 'skipped',
+      ).length
+    : 0;
   const latestWeight = useMemo(() => {
     const rows = bodyMetrics.filter((m) => m.weightKg != null);
     return rows.length ? rows[rows.length - 1].weightKg ?? null : null;
@@ -304,15 +317,20 @@ export default function LiveWorkoutPage() {
     const ex = currentExercise(cur);
     if (!ex) return;
     if (!guardTap(`finish:${ex.exerciseId}`)) return;
-    const isLast = cur.exercises.filter((item) => !isExerciseComplete(item)).length <= 1;
-    const res = mutate((s) => markExerciseDone(s, ex.exerciseId));
-    if (res?.changed) {
-      if (isLast) {
-        setFinishOpen(true);
-      } else {
-        const next = res.session.exercises[res.session.currentIndex];
-        toast(`完成「${ex.name}」，下一个：${next?.name ?? '全部完成'}`);
-      }
+    const rest = cur.exercises.filter(
+      (item) =>
+        item.exerciseId !== ex.exerciseId &&
+        !isExerciseComplete(item) &&
+        item.status !== 'skipped',
+    ).length;
+    const alreadyDone = ex.status === 'done';
+    const res = alreadyDone ? null : mutate((s) => markExerciseDone(s, ex.exerciseId));
+    if (!alreadyDone && !res?.changed) return;
+    if (rest === 0) {
+      setFinishOpen(true);
+    } else {
+      const next = res?.session.exercises[res.session.currentIndex];
+      toast(`完成「${ex.name}」，下一个：${next?.name ?? '全部完成'}`);
     }
   }, [guardTap, mutate, toast]);
 
@@ -573,7 +591,8 @@ export default function LiveWorkoutPage() {
           <>
             <div className="lw-head">
               <span className="lw-kind">
-                {KIND_EMOJI[exercise.kind]} {isCardio ? '有氧 / 专项' : '力量'}
+                {KIND_EMOJI[exercise.kind]} {SESSION_KIND_SHORT[exercise.kind]}
+                {isCardio ? '专项记录' : '训练'}
               </span>
               <div className="exercise-name" data-testid="live-exercise-name">
                 {exercise.name}
@@ -642,7 +661,16 @@ export default function LiveWorkoutPage() {
                 <div className="lw-inputs">
                   {cardio ? (
                     <>
-                      <Field label="实际时长（分钟）">
+                      <div className="lw-cardio-head">
+                        {exercise.kind === 'football'
+                          ? '⚽ 足球专项记录'
+                          : exercise.kind === 'ride'
+                            ? '🚴 骑行记录'
+                            : '🏃 跑步记录'}
+                      </div>
+                      <Field
+                        label={exercise.kind === 'football' ? '上场时间（分钟）' : '实际时长（分钟）'}
+                      >
                         <NumberInput
                           value={editor.durationMin}
                           onChange={(v) => setEditor((e) => ({ ...e, durationMin: v }))}
@@ -681,6 +709,17 @@ export default function LiveWorkoutPage() {
                           testId="live-set-rpe"
                         />
                       </Field>
+                      {(editor.durationMin != null && editor.distanceKm != null) && (
+                        <div className="lw-cardio-hint">
+                          本次配速{' '}
+                          {formatPace(editor.distanceKm, Math.round(editor.durationMin * 60))} ·
+                          平均速度{' '}
+                          {formatNumber(
+                            editor.distanceKm / (Math.max(editor.durationMin, 0.1) / 60),
+                          )}{' '}
+                          km/h
+                        </div>
+                      )}
                     </>
                   ) : (
                     <>
@@ -836,9 +875,13 @@ export default function LiveWorkoutPage() {
                 variant="success"
                 size="xl"
                 onClick={onFinishExercise}
-                data-testid={lastEx ? 'live-finish-session' : 'live-finish-exercise'}
+                data-testid={
+                  lastEx || remainingOthers === 0 ? 'live-finish-session' : 'live-finish-exercise'
+                }
               >
-                {lastEx ? '完成训练并生成总结' : '完成本动作并进入下一项'}
+                {lastEx || remainingOthers === 0
+                  ? '完成训练并生成总结'
+                  : '完成本动作并进入下一项'}
               </Button>
             ) : (
               <Button
@@ -907,8 +950,9 @@ export default function LiveWorkoutPage() {
           {PAIN_SITES.map((site) => (
             <button
               key={site}
-              className={`chip ${painSite === site ? 'accent' : ''}`}
+              className={`chip pain-chip ${painSite === site ? 'accent' : ''}`}
               onClick={() => setPainSite(site)}
+              data-testid="live-pain-site"
             >
               {site}
             </button>

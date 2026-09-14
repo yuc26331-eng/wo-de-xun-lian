@@ -1263,3 +1263,48 @@ table.data-table th.num {
   width: 100%;
   height: auto;
 }
+
+.install-steps {
+  margin: 0;
+  padding-left: 20px;
+  font-size: 14.5px;
+  line-height: 1.7;
+  color: var(--text-2);
+}
+
+.install-steps li + li {
+  margin-top: 6px;
+}
+
+.goal-progress {
+  height: 8px;
+  border-radius: 999px;
+  background: var(--card-2);
+  overflow: hidden;
+}
+
+.goal-progress > i {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  border-radius: 999px;
+}
+
+.drop-zone {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  min-height: 96px;
+  color: var(--text-2);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.drop-zone.compact {
+  flex-direction: row;
+  gap: 8px;
+  min-height: 48px;
+  padding: 12px;
+}

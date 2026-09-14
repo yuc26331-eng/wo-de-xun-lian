@@ -48,8 +48,6 @@ describe('LiveWorkoutPage', () => {
     const user = userEvent.setup();
     renderLive();
 
-    await startLowerBodyPlan(user);
-
     const name = await startLowerBodyPlan(user);
     expect(name.textContent).toContain('杠铃深蹲');
     expect(screen.getByTestId('live-progress').textContent).toContain('动作 1/6');
@@ -89,7 +87,6 @@ describe('LiveWorkoutPage', () => {
     const user = userEvent.setup();
     const first = renderLive();
     await startLowerBodyPlan(user);
-    await screen.findByTestId('live-exercise-name', {}, { timeout: 8000 });
 
     const nameBefore = screen.getByTestId('live-exercise-name').textContent;
     const progressBefore = screen.getByTestId('live-progress').textContent;
@@ -107,4 +104,50 @@ describe('LiveWorkoutPage', () => {
     expect(screen.getByTestId('live-progress').textContent).toBe(progressBefore);
     await waitFor(() =>
       expect(screen.getByTestId('live-complete-set').textContent?.trim()).not.toBe(
-        buttonBefo
+        buttonBefore.trim(),
+      ),
+    );
+  }, 30000);
+
+  it('可以提前结束训练、保存总结，且重新打开不会恢复已完成训练', async () => {
+    const user = userEvent.setup();
+    const first = renderLive();
+    await startLowerBodyPlan(user);
+
+    // 暂停 → 结束并保存
+    await user.click(screen.getByTestId('live-pause'));
+    await user.click(await screen.findByTestId('live-end-early'));
+
+    // 结束弹层：填写 RPE 与感受后保存
+    const confirm = await screen.findByTestId('live-finish-confirm', {}, { timeout: 4000 });
+    await user.type(screen.getByTestId('live-finish-weight'), '71.2');
+    await user.click(confirm);
+
+    // 自动跳转到今日总结页
+    await screen.findByTestId('summary-route', {}, { timeout: 8000 });
+
+    // 重新打开应用：不会再恢复这次已完成的训练，而是回到计划选择
+    first.unmount();
+    renderLive();
+    const picker = await screen.findAllByTestId('live-plan-start', {}, { timeout: 8000 });
+    expect(picker.length).toBeGreaterThan(0);
+  }, 30000);
+
+  it('跳过的动作不计入待完成，只剩最后一项时可直接结束训练', async () => {
+    const user = userEvent.setup();
+    renderLive();
+    await startLowerBodyPlan(user);
+
+    for (let i = 0; i < 5; i += 1) {
+      await user.click(await screen.findByTestId('live-skip'));
+    }
+    await waitFor(() =>
+      expect(screen.getByTestId('live-progress').textContent).toContain('动作 6/6'),
+    );
+
+    // 其余动作都已跳过 → 直接提供「完成训练并生成总结」
+    const finish = await screen.findByTestId('live-finish-session', {}, { timeout: 4000 });
+    await user.click(finish);
+    await screen.findByTestId('live-finish-confirm', {}, { timeout: 4000 });
+  }, 30000);
+});

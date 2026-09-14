@@ -1,0 +1,208 @@
+/**
+ * 导入草稿的交接（sessionStorage）与「合并预览」计算。
+ * 说明：BodyDraft / WeeklyDraft / OcrDraft 是导入模块的内部类型，
+ * 不修改冻结的 src/types/index.ts。
+ */
+import type {
+  DailyLog,
+  MergeDiff,
+  PdfImportRecord,
+  PlanDraft,
+  SummaryDraft,
+} from '../../types';
+import { formatNumber } from '../format';
+import type { BodyDraft } from './parseBodyReport';
+
+export interface WeeklyDraft {
+  kind: 'weekly-plan';
+  importId: string;
+  fileName: string;
+  days: PlanDraft[];
+  warnings: string[];
+}
+
+export interface OcrDraft {
+  kind: 'ocr';
+  importId: string;
+  fileName: string;
+  pageCount: number;
+  warnings: string[];
+}
+
+export type AnyDraft = PlanDraft | SummaryDraft | BodyDraft | WeeklyDraft | OcrDraft;
+
+export const DRAFT_KEY = 'wdxl:import-draft';
+
+const SUPPORTED: AnyDraft['kind'][] = ['plan', 'daily-summary', 'body-report', 'weekly-plan', 'ocr'];
+
+export function saveDraftToSession(draft: AnyDraft): void {
+  try {
+    sessionStorage.setItem(DRAFT_KEY, JSON.stringify(draft));
+  } catch (err) {
+    console.warn('[pdf] 草稿保存失败', err);
+  }
+}
+
+export function readDraftFromSession(): AnyDraft | null {
+  try {
+    const raw = sessionStorage.getItem(DRAFT_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as AnyDraft;
+    if (!parsed || !SUPPORTED.includes(parsed.kind)) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+export function clearDraftFromSession(): void {
+  try {
+    sessionStorage.removeItem(DRAFT_KEY);
+  } catch {
+    /* ignore */
+  }
+}
+
+/* -------------------------------------------------------------- 合并预览 */
+
+interface FieldSpec {
+  key: keyof DailyLog;
+  label: string;
+  fmt?: (v: unknown) => string;
+}
+
+const num = (v: unknown) => (typeof v === 'number' ? formatNumber(v) : String(v ?? ''));
+
+const FIELDS: FieldSpec[] = [
+  { key: 'weightKg', label: '体重', fmt: (v) => `${num(v)} kg` },
+  { key: 'trainingContent', label: '训练内容' },
+  { key: 'trainingVolumeKg', label: '训练量', fmt: (v) => `${num(v)} kg` },
+  { key: 'rpe', label: 'RPE' },
+  { key: 'sleepHours', label: '睡眠', fmt: (v) => `${num(v)} 小时` },
+  { key: 'diet', label: '饮食' },
+  { key: 'pain', label: '疼痛/不适' },
+  { key: 'feeling', label: '今日感受' },
+  { key: 'fatigue', label: '疲劳程度' },
+  { key: 'note', label: '备注' },
+];
+
+function str(v: unknown): string {
+  if (v == null) return '';
+  return String(v).trim();
+}
+
+/** 把草稿转成要写入的 DayLog 字段（不覆盖已有记录里草稿为空的字段） */
+export function draftToDailyLogPatch(draft: SummaryDraft): Partial<DailyLog> {
+  const patch: Partial<DailyLog> = {
+    date: draft.date,
+    weightKg: draft.weightKg,
+    trainingContent: draft.trainingContent || undefined,
+    trainingVolumeKg: draft.trainingVolumeKg,
+    rpe: draft.rpe,
+    sleepHours: draft.sleepHours,
+    diet: draft.diet || undefined,
+    pain: draft.pain || undefined,
+    feeling: draft.feeling || undefined,
+    fatigue: draft.fatigue,
+    note: draft.note || undefined,
+    summaryId: draft.importId,
+    source: 'pdf',
+  };
+  const s = draft.supplements;
+  if (s && (s.proteinG != null || s.proteinScoops != null || s.creatineG != null || str(s.others))) {
+    patch.supplements = {
+      proteinG: s.proteinG ?? null,
+      proteinScoops: s.proteinScoops ?? null,
+      creatineG: s.creatineG ?? null,
+      others: s.others,
+    };
+  }
+  return patch;
+}
+
+export function diffDailyLog(
+  existing: DailyLog | null,
+  draft: SummaryDraft,
+  ctx: { duplicateImport?: boolean; hasTrainingSummary?: boolean } = {},
+): MergeDiff<Partial<DailyLog>> {
+  const patch = draftToDailyLogPatch(draft);
+  const creates: { label: string; value: string }[] = [];
+  const updates: { label: string; from: string; to: string }[] = [];
+  const unchanged: string[] = [];
+
+  for (const f of FIELDS) {
+    const next = patch[f.key];
+    if (next == null || str(next) === '') continue;
+    const prev = existing?.[f.key];
+    const fmt = f.fmt ?? str;
+    if (prev == null || str(prev) === '') {
+      creates.push({ label: f.label, value: fmt(next) });
+    } else if (str(prev) === str(next)) {
+      unchanged.push(f.label);
+    } else {
+      updates.push({ label: f.label, from: fmt(prev), to: fmt(next) });
+    }
+  }
+
+  // 补剂单独比较
+  const sup = patch.supplements;
+  const supLabels: [keyof NonNullable<DailyLog['supplements']>, string, string][] = [
+    ['proteinG', '蛋白粉摄入', 'g'],
+    ['proteinScoops', '蛋白粉勺数', '勺'],
+    ['creatineG', '肌酸', 'g'],
+  ];
+  if (sup) {
+    for (const [key, label, unit] of supLabels) {
+      const next = sup[key];
+      if (next == null) continue;
+      const prev = existing?.supplements?.[key];
+      const value = `${formatNumber(next as number)} ${unit}`;
+      if (prev == null) creates.push({ label, value });
+      else if (prev === next) unchanged.push(label);
+      else updates.push({ label, from: `${formatNumber(prev)} ${unit}`, to: value });
+    }
+  }
+
+  const conflicts: string[] = [];
+  if (existing?.summaryId && existing.summaryId === draft.importId) {
+    conflicts.push('这一天的总结已经由同一份 PDF 导入过，重复保存会产生冗余记录。');
+  }
+  if (ctx.duplicateImport) {
+    conflicts.push('这份 PDF 之前已经导入过（文件名与大小一致），请确认不是重复操作。');
+  }
+  if (ctx.hasTrainingSummary) {
+    conflicts.push('当天已有一次 App 内训练记录，合并后会与训练报告共同存在（不会删除训练报告）。');
+  }
+  if (!conflicts.length && existing && creates.length === 0 && updates.length === 0) {
+    conflicts.push('与已有记录完全一致，无需重复保存。');
+  }
+
+  return { creates, updates, unchanged, conflicts, targetId: existing?.id ?? draft.date, payload: patch };
+}
+
+export function describeDraft(draft: AnyDraft): string {
+  switch (draft.kind) {
+    case 'plan':
+      return `健身计划 · ${draft.exercises.length} 个动作`;
+    case 'weekly-plan':
+      return `周训练计划 · ${draft.days.length} 天`;
+    case 'daily-summary':
+      return '今日训练总结';
+    case 'body-report':
+      return `身体数据报告 · ${draft.entries.length} 条记录`;
+    case 'ocr':
+      return '扫描版 PDF（需要 OCR）';
+  }
+}
+
+export function findDuplicateImport(
+  records: PdfImportRecord[],
+  fileName: string,
+  fileSize: number,
+): PdfImportRecord | null {
+  return (
+    records.find(
+      (r) => r.saved && r.fileName === fileName && Math.abs(r.fileSize - fileSize) < 1024,
+    ) ?? null
+  );
+}
