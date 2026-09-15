@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { expectNoHorizontalScroll, expectTouchTargets } from './helpers';
+import { ensureTrainingPlan, expectNoHorizontalScroll, expectTouchTargets } from './helpers';
 
 test.describe('五个主页面基本可用', () => {
   test('首页 → 训练 → 数据 → 总结 → 我的 都能打开且无横向滚动', async ({ page }) => {
@@ -29,6 +29,7 @@ test.describe('五个主页面基本可用', () => {
   });
 
   test('首页大号开始训练按钮可用，并能进入跟练页', async ({ page }) => {
+    await ensureTrainingPlan(page);
     await page.goto('/');
     const start = page.getByTestId('start-training');
     await expect(start).toBeVisible();

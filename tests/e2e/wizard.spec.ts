@@ -163,7 +163,7 @@ test.describe('Apple Watch 截图：真实识别与纠错', () => {
 });
 
 test.describe('数据清理与目标', () => {
-  test('首页横幅可备份并清理，目标保留并更新为 70kg / 12%', async ({ page }) => {
+  test('首次打开自动备份并清理，目标保留并更新为 70kg / 12%', async ({ page }) => {
     // 先制造一条训练记录与今日总结
     await page.goto('/#/summary');
     await page.getByTestId('summary-start').click();
@@ -173,18 +173,16 @@ test.describe('数据清理与目标', () => {
     });
 
     await page.goto('/#/');
-    await expect(page.getByTestId('cleanup-banner')).toBeVisible({ timeout: 20_000 });
-    await page.getByTestId('cleanup-banner-run').click();
-    await expect(page.getByRole('heading', { name: '一次性数据清理' })).toBeVisible();
-    await expect(page.getByText(/体重 70 kg、体脂率低于 12%/).first()).toBeVisible();
-
+    // 自动执行：先备份再清理，完成后弹出结果
+    await expect(page.getByTestId('cleanup-result')).toBeVisible({
+      timeout: 40_000,
+    });
+    await expect(page.getByText(/体重 70 kg、体脂率低于 12%/)).toBeVisible();
     const download = page.waitForEvent('download', { timeout: 60_000 });
-    await page.getByTestId('cleanup-run').click(); // 第一次点击 = 二次确认
-    await expect(page.getByText(/请再次确认/)).toBeVisible();
-    await page.getByTestId('cleanup-run').click(); // 第二次点击 = 执行
+    await page.getByTestId('cleanup-download').click();
     const file = await download;
     expect(file.suggestedFilename()).toMatch(/我的训练-清理前备份-\d{4}-\d{2}-\d{2}\.json/);
-    await expect(page.getByText(/已备份并清理/)).toBeVisible({ timeout: 30_000 });
+    await page.getByTestId('cleanup-dismiss').click();
 
     // 记录已清空：今日总结回到「开始」入口
     await page.goto('/#/summary');
@@ -196,8 +194,8 @@ test.describe('数据清理与目标', () => {
     await expect(page.getByText('目标体重 70 kg')).toBeVisible({ timeout: 20_000 });
     await expect(page.getByText('目标体脂率低于 12%')).toBeVisible();
 
-    // 横幅不再出现
+    // 不会重复清理
     await page.goto('/#/');
-    await expect(page.getByTestId('cleanup-banner')).toBeHidden();
+    await expect(page.getByTestId('cleanup-result')).toBeHidden();
   });
 });

@@ -46,6 +46,67 @@ export const SAMPLE_PLAN_TEXT = [
   '拉伸放松：股四头肌、腘绳肌、臀肌各 30 秒 × 2 组；泡沫轴放松大腿前侧 2 分钟。',
 ];
 
+/**
+ * 保证浏览器里有一份可用的训练计划。
+ * 说明：v1.3 的一次性数据清理会删除「示例计划」（source: 'sample'），
+ * 所以这里注入一份 source: 'manual' 的计划（清理不会删除用户自己创建的计划）。
+ */
+export async function ensureTrainingPlan(page: Page): Promise<void> {
+  await page.goto('/#/');
+  // 首次打开会自动执行一次性清理，等它结束（没有该卡片说明已经清理过）
+  await page
+    .getByTestId('cleanup-result')
+    .waitFor({ state: 'visible', timeout: 20_000 })
+    .catch(() => undefined);
+
+  await page.evaluate(async () => {
+    const open = () =>
+      new Promise<IDBDatabase>((resolve, reject) => {
+        const req = indexedDB.open('wo-de-xun-lian', 3);
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error);
+      });
+    const db = await open();
+    const now = new Date();
+    const date = `${now.getFullYear()}-${`${now.getMonth() + 1}`.padStart(2, '0')}-${`${now.getDate()}`.padStart(2, '0')}`;
+    const plan = {
+      id: 'e2e-plan',
+      title: 'E2E 测试计划（下肢力量）',
+      date,
+      kind: 'strength',
+      source: 'manual',
+      estimatedMinutes: 60,
+      warmup: [{ name: '慢跑热身', detail: '5 分钟' }],
+      exercises: [
+        {
+          id: 'e2e-ex-1',
+          name: '杠铃深蹲',
+          kind: 'strength',
+          target: { sets: 4, reps: '5', weightKg: 60, restSec: 60, rpe: 8 },
+          order: 0,
+          cue: '膝盖对准脚尖',
+        },
+        {
+          id: 'e2e-ex-2',
+          name: '罗马尼亚硬拉',
+          kind: 'strength',
+          target: { sets: 3, reps: '8', weightKg: 50, restSec: 60, rpe: 7 },
+          order: 1,
+        },
+      ],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction('plans', 'readwrite');
+      tx.objectStore('plans').put(plan);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  });
+  await page.reload();
+}
+
 /** 断言页面没有横向滚动（iPhone 竖屏关键指标） */
 export async function expectNoHorizontalScroll(page: Page): Promise<void> {
   const overflow = await page.evaluate(() => {

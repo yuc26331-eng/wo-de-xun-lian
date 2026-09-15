@@ -3,11 +3,13 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, test } from '@playwright/test';
 import { expectNoHorizontalScroll } from './helpers';
+import { ensureTrainingPlan } from './helpers';
 
 /** 记录可靠 + 训练操作顺手：首页入口、跟练撤销、休息校准、备份导出与导入校验 */
 
 test.describe('首页：今天练什么 / 开始与继续', () => {
   test('首屏显示今天练什么、预计时长与开始训练入口', async ({ page }) => {
+    await ensureTrainingPlan(page);
     await page.goto('/#/');
     await expect(page.getByText('今天练什么', { exact: true })).toBeVisible();
     await expect(page.getByTestId('today-plan-title')).toContainText(/力量|跑步|训练/);
@@ -17,6 +19,7 @@ test.describe('首页：今天练什么 / 开始与继续', () => {
   });
 
   test('开始训练后首页变为继续训练，并显示已完成组数', async ({ page }) => {
+    await ensureTrainingPlan(page);
     await page.goto('/#/');
     await page.getByTestId('start-training').click();
     await expect(page.getByTestId('live-complete-set')).toBeVisible({ timeout: 20_000 });
@@ -34,6 +37,7 @@ test.describe('首页：今天练什么 / 开始与继续', () => {
 
 test.describe('跟练：大计时 / 撤销误操作 / 休息校准', () => {
   test('大号计时可见，撤销上一组可一键回退', async ({ page }) => {
+    await ensureTrainingPlan(page);
     await page.goto('/#/');
     await page.getByTestId('start-training').click();
     await expect(page.getByTestId('live-timer')).toBeVisible({ timeout: 20_000 });
@@ -59,6 +63,7 @@ test.describe('跟练：大计时 / 撤销误操作 / 休息校准', () => {
   });
 
   test('休息倒计时按真实时间校准：刷新后剩余时间继续减少', async ({ page }) => {
+    await ensureTrainingPlan(page);
     await page.goto('/#/');
     await page.getByTestId('start-training').click();
     await expect(page.getByTestId('live-complete-set')).toBeVisible({ timeout: 20_000 });
@@ -82,6 +87,7 @@ test.describe('跟练：大计时 / 撤销误操作 / 休息校准', () => {
   });
 
   test('暂停后计时停止，恢复后继续累计', async ({ page }) => {
+    await ensureTrainingPlan(page);
     await page.goto('/#/');
     await page.getByTestId('start-training').click();
     await expect(page.getByTestId('live-timer')).toBeVisible({ timeout: 20_000 });

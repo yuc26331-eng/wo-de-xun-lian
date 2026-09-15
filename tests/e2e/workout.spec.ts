@@ -1,6 +1,11 @@
 import { expect, test } from '@playwright/test';
+import { ensureTrainingPlan } from './helpers';
 
 test.describe('实时跟练完整流程', () => {
+  test.beforeEach(async ({ page }) => {
+    await ensureTrainingPlan(page);
+  });
+
   test('完成一组 → 休息倒计时 → 刷新后进度仍在（只记录一次）', async ({ page }) => {
     await page.goto('/');
     await page.getByTestId('start-training').click();

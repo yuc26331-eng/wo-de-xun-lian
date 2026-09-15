@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { ensureTrainingPlan } from './helpers';
 
 test.describe('PWA / 离线能力', () => {
   test('Manifest、图标与独立窗口配置正确', async ({ page, request }) => {
@@ -57,6 +58,7 @@ test.describe('PWA / 离线能力', () => {
   });
 
   test('刷新与重新打开后本地数据仍在（IndexedDB）', async ({ page }) => {
+    await ensureTrainingPlan(page);
     await page.goto('/');
     await expect(page.getByText('本周训练', { exact: true })).toBeVisible();
     // 记录首页展示的今日计划标题

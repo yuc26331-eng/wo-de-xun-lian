@@ -37,6 +37,66 @@ await page.goto(`${url}/`, { waitUntil: 'networkidle' });
 await page.waitForSelector('[data-testid="today-plan-title"]', { timeout: 30000 });
 check('线上首页可打开且渲染中文界面', true, url);
 
+// v1.3：首次打开会自动「先备份、再清理」，清理后示例计划被删除，
+// 验收脚本自己注入一份测试计划（source: manual，不会被清理）。
+const cleanupCard = page.getByTestId('cleanup-result');
+const sawCleanup = await cleanupCard.isVisible({ timeout: 30000 }).catch(() => false);
+check('首次打开自动完成一次性清理（含备份）', sawCleanup);
+if (sawCleanup) {
+  const dl = page.waitForEvent('download', { timeout: 60000 }).catch(() => null);
+  await page.getByTestId('cleanup-download').click();
+  const file = await dl;
+  check(
+    '清理前备份可下载',
+    Boolean(file && /我的训练-清理前备份-/.test(file.suggestedFilename())),
+    file?.suggestedFilename() ?? '未触发下载',
+  );
+  await page.getByTestId('cleanup-dismiss').click();
+}
+
+await page.evaluate(async () => {
+  const db = await new Promise((resolve, reject) => {
+    const req = indexedDB.open('wo-de-xun-lian', 3);
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+  const now = new Date();
+  const iso = `${now.getFullYear()}-${`${now.getMonth() + 1}`.padStart(2, '0')}-${`${now.getDate()}`.padStart(2, '0')}`;
+  await new Promise((resolve, reject) => {
+    const tx = db.transaction('plans', 'readwrite');
+    tx.objectStore('plans').put({
+      id: 'live-check-plan',
+      title: '验收测试计划（下肢力量）',
+      date: iso,
+      kind: 'strength',
+      source: 'manual',
+      estimatedMinutes: 60,
+      warmup: [{ name: '慢跑热身', detail: '5 分钟' }],
+      exercises: [
+        {
+          id: 'live-ex-1',
+          name: '杠铃深蹲',
+          kind: 'strength',
+          target: { sets: 4, reps: '5', weightKg: 60, restSec: 60, rpe: 8 },
+          order: 0,
+        },
+        {
+          id: 'live-ex-2',
+          name: '罗马尼亚硬拉',
+          kind: 'strength',
+          target: { sets: 3, reps: '8', weightKg: 50, restSec: 60, rpe: 7 },
+          order: 1,
+        },
+      ],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+});
+await page.reload({ waitUntil: 'networkidle' });
+
 await page.screenshot({ path: `${out}/live-home.png`, fullPage: true });
 
 for (const [label, hash] of [
@@ -140,6 +200,9 @@ await context.setOffline(false);
 
 // ---- v1.1 新增：今日总结六大分区 / 一键导出 / ChatGPT 报告 / 应用内更新 ----
 await page.goto(`${url}/#/summary`, { waitUntil: 'networkidle' });
+// v1.3 起今日总结默认是逐步引导，六大分区在「完整表单」里
+await page.getByTestId('summary-start').click();
+await page.getByTestId('summary-advanced').click();
 await page.getByTestId('summary-status').waitFor({ timeout: 20000 });
 const sections = await page
   .locator('.collapse-head')
@@ -242,11 +305,11 @@ check(
 
 // ---- v1.3 新增：逐步引导 / 截图识别 / 补剂入库 / 一次性清理横幅 ----
 await page.goto(`${url}/#/`, { waitUntil: 'networkidle' });
-const cleanupBanner = await page
-  .getByTestId('cleanup-banner')
+const cleanupDone = await page
+  .getByTestId('cleanup-result')
   .isVisible()
   .catch(() => false);
-check('首页提供一次性数据清理入口（备份后清理）', cleanupBanner);
+check('一次性清理已完成且不再重复执行', !cleanupDone);
 
 await page.goto(`${url}/#/summary`, { waitUntil: 'networkidle' });
 await page.getByTestId('summary-start').waitFor({ timeout: 20000 });
@@ -254,11 +317,21 @@ await page.getByTestId('summary-start').click();
 const step1 = (await page.getByTestId('wizard-progress').textContent()) ?? '';
 check('今日总结默认进入逐步引导', /第 1 \/ 7 步/.test(step1), step1.trim());
 
+/** 等步骤切换完成（切换要等草稿保存） */
+const waitStep = async (n) => {
+  for (let i = 0; i < 40; i += 1) {
+    const text = (await page.getByTestId('wizard-progress').textContent().catch(() => '')) ?? '';
+    if (new RegExp(`第 ${n} / 7 步`).test(text)) return text;
+    await page.waitForTimeout(400);
+  }
+  return (await page.getByTestId('wizard-progress').textContent()) ?? '';
+};
+
 // 第 1 步：训练
 await page.getByTestId('wizard-training-items').fill('现场验收：下肢力量');
 await page.getByTestId('wizard-next').click();
 // 第 2 步：真实 OCR 识别截图
-const step2 = (await page.getByTestId('wizard-progress').textContent()) ?? '';
+const step2 = await waitStep(2);
 check('进入第 2 步（Apple Watch 截图识别）', /第 2 \/ 7 步/.test(step2), step2.trim());
 await page
   .getByTestId('ocr-input-watch')
@@ -269,9 +342,7 @@ try {
   await page.getByTestId('ocr-field-watch-activeEnergyKcal').waitFor({ timeout: 240000 });
   await page.waitForFunction(
     () => {
-      const el = document.querySelector<HTMLInputElement>(
-        '[data-testid="ocr-field-watch-activeEnergyKcal"]',
-      );
+      const el = document.querySelector('[data-testid="ocr-field-watch-activeEnergyKcal"]');
       return Boolean(el && el.value);
     },
     undefined,
@@ -291,9 +362,11 @@ await page.screenshot({ path: `${out}/live-ocr.png`, fullPage: true });
 
 // 第 5 步：补剂（从「我的」迁移到今日总结）
 await page.getByTestId('wizard-next').click(); // → 第 3 步
+await waitStep(3);
 await page.getByTestId('wizard-skip').click(); // → 第 4 步
+await waitStep(4);
 await page.getByTestId('wizard-skip').click(); // → 第 5 步
-const step5 = (await page.getByTestId('wizard-progress').textContent()) ?? '';
+const step5 = await waitStep(5);
 check('补剂记录位于今日总结第 5 步', /第 5 \/ 7 步/.test(step5), step5.trim());
 await page.getByTestId('wizard-protein-scoops').fill('2');
 await page.getByTestId('wizard-creatine').fill('5');
