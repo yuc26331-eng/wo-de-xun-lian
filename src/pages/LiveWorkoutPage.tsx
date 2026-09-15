@@ -467,6 +467,53 @@ export default function LiveWorkoutPage() {
     }
   }, [editForm, editKind, editSet, mutate, toast]);
 
+  /**
+   * 一键撤销上一组：训练中误点「完成本组」时最常用的补救操作。
+   * 同时清掉休息倒计时，避免休息还在跑但那一组已经不算数。
+   */
+  const onUndoLastSet = useCallback(() => {
+    const cur = sessionRef.current;
+    if (!cur) return;
+    const ex = currentExercise(cur);
+    const lastDone = ex ? [...ex.sets].reverse().find((s) => s.done) : null;
+    if (!ex || !lastDone) {
+      toast('当前没有可以撤销的组');
+      return;
+    }
+    const res = mutate((s) => {
+      const undone = undoSet(s, lastDone.id);
+      if (!undone.changed) return undone;
+      // 撤销成功就是一次有效修改；顺带清掉休息倒计时（没有休息时也不能丢掉撤销结果）
+      const cleared = clearRest(undone.session);
+      return { session: cleared.session, changed: true };
+    });
+    if (res?.changed) {
+      // 撤销后允许立刻重新记录这一组（否则会被 400ms 防连点挡住）
+      tapRef.current = { key: '', t: 0 };
+      toast(`已撤销第 ${lastDone.index} 组`);
+    }
+  }, [mutate, toast]);
+
+  /** 首次进入时如果恢复了未完成的训练，明确告诉用户恢复到哪一步 */
+  const resumeNotified = useRef(false);
+  useEffect(() => {
+    if (!view || resumeNotified.current) return;
+    const done = view.exercises.reduce((n, ex) => n + ex.sets.filter((s) => s.done).length, 0);
+    if (done === 0) {
+      resumeNotified.current = true;
+      return;
+    }
+    resumeNotified.current = true;
+    const ex = currentExercise(view);
+    toast(
+      `已恢复上次进度：动作 ${view.currentIndex + 1}/${view.exercises.length}（${
+        ex?.name ?? ''
+      }），已完成 ${done} 组`,
+    );
+    // 仅在首次挂载时提示一次
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   /* --------------------------------------------------------------- 渲染 */
   if (!ready) {
     return (
@@ -579,7 +626,27 @@ export default function LiveWorkoutPage() {
         <i style={{ width: `${Math.round(progress.rate * 100)}%` }} />
       </div>
 
+      {/* 保存状态：让用户随时确认进度已写入本机 */}
+      <div className="lw-savebar" data-testid="live-save-status">
+        ✓ 已自动保存 {new Date(view.updatedAt).toLocaleTimeString('zh-CN', {
+          hour: '2-digit',
+          minute: '2-digit',
+          second: '2-digit',
+        })}
+        <span className="muted"> · 进度保存在本机，锁屏 / 切后台 / 刷新都可以继续</span>
+      </div>
+
       <div className="focus-body">
+        {/* 大号计时：训练中最需要一眼看清的信息 */}
+        {!paused && (
+          <div className="lw-clock" data-testid="live-timer">
+            <div className="timer-huge">{elapsedText}</div>
+            <div className="tiny muted center">
+              已训练时间 · 动作 {progress.index + 1}/{progress.total} · 本动作已完成{' '}
+              {doneSets}/{exercise.sets.length} 组
+            </div>
+          </div>
+        )}
         {paused ? (
           <Card className="lw-paused">
             <div className="lw-paused-emoji">⏸</div>
@@ -626,13 +693,20 @@ export default function LiveWorkoutPage() {
               {target.reps ? ` · ${target.reps} 次` : ''}
               {target.weightKg != null ? ` · ${formatNumber(target.weightKg)}kg` : ''}
             </div>
+            <div className="tiny muted" style={{ marginTop: 6 }}>
+              已训练 {elapsedText} · 倒计时按真实时间校准，锁屏或切后台回来依然准确
+            </div>
             <div
               className="tiny muted center"
               style={{ marginTop: 8 }}
               data-testid="live-progress-done"
             >
               已完成 {progress.doneSets}/{progress.plannedSets} 组 · 剩余 {pendingCount} 个动作 ·
-              自动保存中
+              {` 已自动保存 ${new Date(view.updatedAt).toLocaleTimeString('zh-CN', {
+                hour: '2-digit',
+                minute: '2-digit',
+                second: '2-digit',
+              })}`}
             </div>
             <div className="col" style={{ gap: 10, marginTop: 16, width: '100%', maxWidth: 420 }}>
               <Button
@@ -658,6 +732,17 @@ export default function LiveWorkoutPage() {
               >
                 延长 30 秒
               </Button>
+              {doneSets > 0 && (
+                <Button
+                  block
+                  size="lg"
+                  variant="ghost"
+                  onClick={onUndoLastSet}
+                  data-testid="live-rest-undo"
+                >
+                  ↩︎ 撤销上一组（刚才点错了）
+                </Button>
+              )}
             </div>
           </div>
         ) : (
@@ -713,9 +798,20 @@ export default function LiveWorkoutPage() {
             <Card className="lw-sets">
               <div className="row-between">
                 <span className="strong">本组记录</span>
-                <span className="tiny muted">
-                  {doneSets}/{exercise.sets.length} 组已完成
-                </span>
+                <div className="row" style={{ gap: 8 }}>
+                  <span className="tiny muted">
+                    {doneSets}/{exercise.sets.length} 组已完成
+                  </span>
+                  {doneSets > 0 && (
+                    <button
+                      className="chip accent tap"
+                      onClick={onUndoLastSet}
+                      data-testid="live-undo-set"
+                    >
+                      ↩︎ 撤销上一组
+                    </button>
+                  )}
+                </div>
               </div>
               <div className="set-dots" style={{ marginTop: 10 }}>
                 {exercise.sets.map((s, i) => (

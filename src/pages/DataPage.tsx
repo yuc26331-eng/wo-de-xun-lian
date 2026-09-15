@@ -3,6 +3,7 @@
  * 体重 / 体脂 / 训练量 / RPE / 睡眠恢复 / 饮水蛋白 / 训练日历 / 个人纪录 PR
  */
 import { useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Page } from '../components/Page';
 import { BarChart, CalendarGrid, LineChart, type ChartPoint } from '../components/SimpleChart';
 import {
@@ -36,6 +37,11 @@ import {
   uid,
 } from '../lib/format';
 import { useAppData } from '../state/AppData';
+import {
+  exerciseProgression,
+  progressionSummary,
+  trainedExercises,
+} from '../lib/progress';
 import type { BodyMetric, ISODate, PRMetric, PersonalRecord } from '../types';
 
 type Tab = 'trends' | 'calendar' | 'records';
@@ -75,6 +81,7 @@ function buildSeries<T>(
 
 export default function DataPage() {
   const toast = useToast();
+  const navigate = useNavigate();
   const {
     ready,
     bodyMetrics,
@@ -186,6 +193,29 @@ export default function DataPage() {
         from,
       ),
     [dailyLogs, from],
+  );
+
+  // 动作进步：选择器默认取练得最多的动作
+  const [progressExercise, setProgressExercise] = useState('');
+  const exerciseOptions = useMemo(() => trainedExercises(summaries), [summaries]);
+  const activeExercise = progressExercise || exerciseOptions[0]?.name || '';
+  const progression = useMemo(
+    () => (activeExercise ? exerciseProgression(summaries, activeExercise) : null),
+    [summaries, activeExercise],
+  );
+  const weightPoints: ChartPoint[] = useMemo(
+    () =>
+      (progression?.points ?? [])
+        .filter((p) => p.topWeight != null)
+        .map((p) => ({ label: formatDateShort(p.date), value: p.topWeight as number })),
+    [progression],
+  );
+  const repsPoints: ChartPoint[] = useMemo(
+    () =>
+      (progression?.points ?? [])
+        .filter((p) => p.maxReps != null)
+        .map((p) => ({ label: formatDateShort(p.date), value: p.maxReps as number })),
+    [progression],
   );
   const waterSeries = useMemo(
     () => buildSeries(bodyMetrics, (m) => ({ date: m.date, value: m.waterMl }), from),
@@ -378,6 +408,130 @@ export default function DataPage() {
           <Card>
             <LineChart points={rpeSeries} tone="var(--orange)" />
           </Card>
+
+          {/* 同一动作的进步（全部来自真实记录，没有数据时给引导） */}
+          <SectionTitle action="全部记录" onAction={() => navigate('/history')}>
+            动作进步
+          </SectionTitle>
+          <div data-testid="exercise-progress-card">
+          <Card>
+            {exerciseOptions.length === 0 ? (
+              <EmptyState
+                emoji="📈"
+                title="还没有可以对比的训练记录"
+                desc="完成训练并用「完成本组」记录重量或次数后，这里会显示同一动作的变化"
+                action={
+                  <Button variant="primary" onClick={() => navigate('/')}>
+                    去开始训练
+                  </Button>
+                }
+              />
+            ) : (
+              <>
+                <div className="row-between" style={{ gap: 10 }}>
+                  <select
+                    className="select"
+                    value={activeExercise}
+                    data-testid="progress-exercise-select"
+                    onChange={(e) => setProgressExercise(e.target.value)}
+                  >
+                    {exerciseOptions.map((o) => (
+                      <option key={o.name} value={o.name}>
+                        {o.name}（{o.sessions} 次）
+                      </option>
+                    ))}
+                  </select>
+                  {progression && progression.trend !== 'none' && (
+                    <Chip
+                      tone={
+                        progression.trend === 'up'
+                          ? 'green'
+                          : progression.trend === 'down'
+                            ? 'orange'
+                            : 'default'
+                      }
+                    >
+                      {progression.trend === 'up'
+                        ? '↑ 有进步'
+                        : progression.trend === 'down'
+                          ? '↓ 略有回落'
+                          : '→ 基本持平'}
+                    </Chip>
+                  )}
+                </div>
+
+                {progression && progression.points.length > 0 ? (
+                  <>
+                    <div className="stat-grid three" style={{ marginTop: 12 }}>
+                      <Stat
+                        label="首次最大重量"
+                        value={
+                          progression.firstWeight?.topWeight != null
+                            ? formatNumber(progression.firstWeight.topWeight)
+                            : '—'
+                        }
+                        unit={progression.firstWeight?.topWeight != null ? 'kg' : undefined}
+                        sub={progression.firstWeight?.date.slice(5)}
+                      />
+                      <Stat
+                        label="最新最大重量"
+                        value={
+                          progression.lastWeight?.topWeight != null
+                            ? formatNumber(progression.lastWeight.topWeight)
+                            : '—'
+                        }
+                        unit={progression.lastWeight?.topWeight != null ? 'kg' : undefined}
+                        sub={progression.lastWeight?.date.slice(5)}
+                      />
+                      <Stat
+                        label="重量变化"
+                        value={
+                          progression.weightDelta != null
+                            ? `${progression.weightDelta > 0 ? '+' : ''}${formatNumber(
+                                progression.weightDelta,
+                              )}`
+                            : '—'
+                        }
+                        unit={progression.weightDelta != null ? 'kg' : undefined}
+                        sub={
+                          progression.repsDelta != null && progression.repsDelta !== 0
+                            ? `次数 ${progression.repsDelta > 0 ? '+' : ''}${progression.repsDelta}`
+                            : `记录 ${progression.points.length} 次`
+                        }
+                      />
+                    </div>
+                    <div className="divider" />
+                    <div className="small muted" style={{ marginBottom: 6 }}>
+                      最大重量趋势（kg）
+                    </div>
+                    <LineChart points={weightPoints} unit="kg" height={130} />
+                    {repsPoints.length > 0 && (
+                      <>
+                        <div className="small muted" style={{ margin: '14px 0 6px' }}>
+                          单组最多次数趋势
+                        </div>
+                        <LineChart
+                          points={repsPoints}
+                          unit="次"
+                          tone="var(--purple)"
+                          height={110}
+                        />
+                      </>
+                    )}
+                    <div className="tiny" style={{ marginTop: 10 }}>
+                      {progressionSummary(progression)}
+                    </div>
+                  </>
+                ) : (
+                  <div className="tiny muted" style={{ marginTop: 10 }}>
+                    {activeExercise} 目前只有动作名记录（旧版本没有保存每组的重量/次数）。
+                    下次训练用「完成本组」记录重量后，这里就会开始显示变化。
+                  </div>
+                )}
+              </>
+            )}
+          </Card>
+          </div>
 
           <SectionTitle>睡眠与恢复</SectionTitle>
           <Card>

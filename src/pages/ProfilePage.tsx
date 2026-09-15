@@ -16,6 +16,7 @@ import {
   SectionTitle,
   Segmented,
   Sheet,
+  Stat,
   Stepper,
   TextInput,
   useToast,
@@ -32,10 +33,44 @@ import {
   uid,
 } from '../lib/format';
 import { useAppData } from '../state/AppData';
+import { currentVersion } from '../lib/update/updater';
 import { UpdatePanel } from '../components/UpdatePanel';
 import { PDF_KIND_LABEL, type BackupFile, type Goal, type ThemeMode } from '../types';
 
 type InstallPromptEvent = Event & { prompt: () => Promise<void>; userChoice?: Promise<unknown> };
+
+/** 备份文件里允许出现的数据分区（用于格式校验） */
+const BACKUP_KEYS = [
+  'plans',
+  'summaries',
+  'bodyMetrics',
+  'dailyLogs',
+  'exercises',
+  'templates',
+  'prs',
+  'goals',
+  'settings',
+  'liveSession',
+  'pdfImports',
+  'chatGptReports',
+  'attachments',
+];
+
+interface RestoreSummary {
+  plans: number;
+  summaries: number;
+  dailyLogs: number;
+  bodyMetrics: number;
+  chatGptReports: number;
+  attachments: number;
+}
+
+interface PendingRestore {
+  file: BackupFile;
+  summary: RestoreSummary;
+  fileName: string;
+  exportedAt: string;
+}
 
 function isStandalone(): boolean {
   return (
@@ -77,6 +112,8 @@ export default function ProfilePage() {
     restoreBackup,
     clearAllData,
     restoreSamples,
+    attachments,
+    chatGptReports,
   } = useAppData();
 
   const today = toISODate();
@@ -94,6 +131,9 @@ export default function ProfilePage() {
   const [confirmSamples, setConfirmSamples] = useState(false);
   const [installEvent, setInstallEvent] = useState<InstallPromptEvent | null>(null);
   const [standalone, setStandalone] = useState(false);
+  const [pendingRestore, setPendingRestore] = useState<PendingRestore | null>(null);
+  const [restoreOpen, setRestoreOpen] = useState(false);
+  const [restoring, setRestoring] = useState(false);
   const restoreInput = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -139,12 +179,46 @@ export default function ProfilePage() {
 
   async function onRestoreFile(file: File) {
     try {
+      if (file.size > 60 * 1024 * 1024) {
+        toast('备份文件超过 60MB，可能不是本应用的备份', 'error');
+        return;
+      }
+      // 不按扩展名拦截（部分浏览器/系统不保留文件名后缀），改为按内容校验
       const text = await file.text();
       const parsed = JSON.parse(text) as BackupFile;
-      await restoreBackup(parsed);
-      toast('备份已恢复', 'success');
+      // 格式校验：必须是本应用导出的备份，且包含可识别的数据结构
+      if (parsed?.app !== 'wo-de-xun-lian' || !parsed.data || typeof parsed.data !== 'object') {
+        toast('这不是「我的训练」的备份文件，已停止导入', 'error');
+        return;
+      }
+      const unknownKeys = Object.keys(parsed.data).filter(
+        (k) => !BACKUP_KEYS.includes(k),
+      );
+      if (unknownKeys.length === Object.keys(parsed.data).length) {
+        toast('备份内容无法识别，已停止导入', 'error');
+        return;
+      }
+      const summary = {
+        plans: parsed.data.plans?.length ?? 0,
+        summaries: parsed.data.summaries?.length ?? 0,
+        dailyLogs: parsed.data.dailyLogs?.length ?? 0,
+        bodyMetrics: parsed.data.bodyMetrics?.length ?? 0,
+        chatGptReports: parsed.data.chatGptReports?.length ?? 0,
+        attachments:
+          (parsed as unknown as { attachmentFiles?: unknown[] }).attachmentFiles?.length ??
+          parsed.data.attachments?.length ??
+          0,
+      };
+      setPendingRestore({ file: parsed, summary, fileName: file.name, exportedAt: parsed.exportedAt });
+      setRestoreOpen(true);
     } catch (err) {
-      toast(err instanceof Error ? err.message : '备份文件无法读取', 'error');
+      console.error('[backup] 解析失败', err);
+      toast(
+        err instanceof Error && err.name === 'SyntaxError'
+          ? '备份文件已损坏（不是有效的 JSON）'
+          : '备份文件无法读取，请确认文件完整',
+        'error',
+      );
     }
   }
 
@@ -370,17 +444,41 @@ export default function ProfilePage() {
       {/* 备份与恢复 */}
       <SectionTitle>备份与恢复</SectionTitle>
       <Card>
+        <div className="row-between" style={{ marginBottom: 10 }}>
+          <span className="strong" style={{ fontSize: 15 }}>
+            数据保存在本机
+          </span>
+          <Chip tone="green">不上传服务器</Chip>
+        </div>
+        <div className="tiny muted" style={{ marginBottom: 12 }}>
+          计划 {plans.length} · 训练记录 {summaries.length} · 每日总结 {dailyLogs.length} · 身体数据{' '}
+          {bodyMetrics.length} · 截图与报告 {attachments.length + chatGptReports.length}
+          <br />
+          卸载应用、清理浏览器数据或换手机会丢失这些内容，建议每周导出一次备份。
+        </div>
         <div className="col" style={{ gap: 10 }}>
-          <Button block size="lg" variant="primary" onClick={() => void exportBackup()}>
-            导出 JSON 备份
+          <Button
+            block
+            size="lg"
+            variant="primary"
+            data-testid="export-backup"
+            onClick={() => void exportBackup()}
+          >
+            导出完整备份（含截图与报告）
           </Button>
-          <Button block size="lg" onClick={() => restoreInput.current?.click()}>
+          <Button
+            block
+            size="lg"
+            data-testid="restore-open"
+            onClick={() => restoreInput.current?.click()}
+          >
             从备份文件恢复
           </Button>
           <input
             ref={restoreInput}
             type="file"
             accept="application/json,.json"
+            data-testid="restore-input"
             style={{ display: 'none' }}
             onChange={(e) => {
               const file = e.target.files?.[0];
@@ -444,8 +542,73 @@ export default function ProfilePage() {
       )}
 
       <div className="tiny muted center" style={{ margin: '24px 0 8px' }}>
-        我的训练 · v1.0.0 · 数据本地存储，离线可用
+        我的训练 · v{currentVersion()} · 数据本地存储，离线可用
       </div>
+
+      {/* 恢复确认：先展示将写入什么，再决定是否导入 */}
+      <Sheet
+        open={restoreOpen}
+        onClose={() => setRestoreOpen(false)}
+        title="确认恢复备份？"
+        footer={
+          <div className="col" style={{ gap: 10 }}>
+            <Button
+              block
+              size="lg"
+              variant="primary"
+              disabled={restoring}
+              data-testid="restore-confirm"
+              onClick={async () => {
+                if (!pendingRestore || restoring) return;
+                setRestoring(true);
+                try {
+                  await restoreBackup(pendingRestore.file);
+                  toast('备份已恢复（同一天的记录已用备份内容覆盖）', 'success');
+                  setRestoreOpen(false);
+                  setPendingRestore(null);
+                } catch (err) {
+                  console.error('[backup] 恢复失败', err);
+                  toast('恢复失败：备份内容不完整，原有数据未被修改', 'error');
+                } finally {
+                  setRestoring(false);
+                }
+              }}
+            >
+              {restoring ? '正在恢复…' : '确认恢复'}
+            </Button>
+            <Button block size="lg" onClick={() => setRestoreOpen(false)}>
+              取消
+            </Button>
+          </div>
+        }
+      >
+        {pendingRestore && (
+          <div>
+            <div className="small muted">文件：{pendingRestore.fileName}</div>
+            <div className="small muted" style={{ marginTop: 4 }}>
+              导出时间：
+              {pendingRestore.exportedAt
+                ? formatDateCN(pendingRestore.exportedAt.slice(0, 10))
+                : '未知'}
+            </div>
+            <div className="divider" />
+            <div className="stat-grid three">
+              <Stat label="训练计划" value={pendingRestore.summary.plans} />
+              <Stat label="训练记录" value={pendingRestore.summary.summaries} />
+              <Stat label="每日总结" value={pendingRestore.summary.dailyLogs} />
+            </div>
+            <div className="stat-grid three" style={{ marginTop: 10 }}>
+              <Stat label="身体数据" value={pendingRestore.summary.bodyMetrics} />
+              <Stat label="分析报告" value={pendingRestore.summary.chatGptReports} />
+              <Stat label="截图附件" value={pendingRestore.summary.attachments} />
+            </div>
+            <div className="chip orange" style={{ marginTop: 12, whiteSpace: 'normal' }}>
+              导入方式：按 id 合并。同一天 / 同一条的记录会用备份内容覆盖，其他本机记录保持不变；
+              不会清空现有数据。若担心，请先导出当前备份。
+            </div>
+          </div>
+        )}
+      </Sheet>
 
       {/* 新增目标 */}
       <Sheet

@@ -64,7 +64,9 @@ test.describe('iPhone 竖屏布局', () => {
   test('跟练页面主要按钮触控区足够大', async ({ page }) => {
     await page.goto('/');
     await page.getByTestId('start-training').click();
-    await expect(page.getByText(/动作\s*1\s*\/\s*\d+/)).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByTestId('live-progress')).toContainText(/动作\s*1\s*\/\s*\d+/, {
+      timeout: 15_000,
+    });
     await expectTouchTargets(page, '.focus-bottom .btn');
     await expectNoHorizontalScroll(page);
   });

@@ -243,3 +243,35 @@
 .focus .chip.pain-chip.accent {
   border-color: transparent;
 }
+
+/* ---------------------------------------------------------------- */
+/* v1.1：保存状态条 + 大号计时                                        */
+/* ---------------------------------------------------------------- */
+
+.lw-savebar {
+  padding: 6px 16px 8px;
+  font-size: 11.5px;
+  line-height: 1.4;
+  color: var(--green);
+  max-width: 720px;
+  width: 100%;
+  margin: 0 auto;
+}
+
+.lw-savebar .muted {
+  color: var(--muted);
+}
+
+.lw-clock {
+  padding: 10px 0 14px;
+}
+
+.lw-clock .timer-huge {
+  font-size: 60px;
+}
+
+@media (max-width: 360px) {
+  .lw-clock .timer-huge {
+    font-size: 50px;
+  }
+}

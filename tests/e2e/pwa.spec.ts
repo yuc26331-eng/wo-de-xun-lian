@@ -68,7 +68,7 @@ test.describe('PWA / 离线能力', () => {
 
     await page.reload();
     await expect(page.getByText('最近训练', { exact: true })).toBeVisible();
-    await expect(page.getByText('今日计划', { exact: true })).toBeVisible();
+    await expect(page.getByText('今天练什么', { exact: true })).toBeVisible();
     await expect(page.locator('[data-testid="today-plan-title"]').first()).toHaveText(
       planTitle!.trim(),
     );

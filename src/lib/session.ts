@@ -12,6 +12,7 @@ import type {
   CardioRecord,
   ExerciseItem,
   ExerciseProgress,
+  ExerciseSetRecord,
   ISODate,
   LiveSession,
   PainRecord,
@@ -689,6 +690,24 @@ export function finishSession(
     new Set([...session.pain.map((p) => p.site), ...(extras.painSites ?? [])]),
   ).filter(Boolean);
 
+  // 保存每个动作的实际组数据（重量/次数/RPE），让「同一动作的进步」有据可查
+  const exerciseSets: ExerciseSetRecord[] = session.exercises.map((ex) => ({
+    name: ex.name,
+    kind: ex.kind,
+    status: ex.status,
+    doneSets: ex.sets.filter((s) => s.done).length,
+    plannedSets: ex.sets.length,
+    sets: ex.sets.map((s, i) => ({
+      index: s.index ?? i + 1,
+      weightKg: s.weightKg ?? null,
+      reps: s.reps ?? null,
+      durationSec: s.durationSec ?? null,
+      distanceKm: s.distanceKm ?? null,
+      rpe: s.rpe ?? null,
+      done: Boolean(s.done),
+    })),
+  }));
+
   const date: ISODate = toISODate(now);
   return {
     id: uid('sum'),
@@ -707,6 +726,7 @@ export function finishSession(
     totalVolumeKg: totals.totalVolumeKg,
     completionRate: totals.completionRate,
     cardio,
+    exerciseSets,
     bodyWeightKg: extras.bodyWeightKg ?? null,
     rpe: extras.rpe ?? null,
     fatigue: extras.fatigue ?? null,

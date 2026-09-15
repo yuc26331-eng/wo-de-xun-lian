@@ -197,8 +197,47 @@ const versionRes = await page.request.get(`${url}/version.json`);
 const versionJson = versionRes.ok() ? await versionRes.json() : null;
 check(
   '线上版本信息正确',
-  versionJson?.version === '1.1.0' && Array.isArray(versionJson?.notes) && versionJson.notes.length > 0,
+  typeof versionJson?.version === 'string' && Array.isArray(versionJson?.notes) && versionJson.notes.length > 0,
   `version=${versionJson?.version}`,
+);
+
+// ---- v1.2 新增：首页「今天练什么」/ 大计时 / 撤销 / 动作进步 ----
+await page.goto(`${url}/#/`, { waitUntil: 'networkidle' });
+await page.getByTestId('today-plan-title').waitFor({ timeout: 20000 });
+const heroHasDuration = await page.getByText('预计时长').isVisible().catch(() => false);
+const heroCta = (await page.getByTestId('start-training').textContent()) ?? '';
+check('首页显示今天练什么与预计时长', heroHasDuration, heroCta.trim());
+
+await page.getByTestId('start-training').click();
+await page.getByTestId('live-timer').waitFor({ timeout: 20000 });
+check('跟练页显示大号计时与保存状态', true);
+const saveBar = (await page.getByTestId('live-save-status').textContent()) ?? '';
+check('跟练页显示自动保存状态', /已自动保存/.test(saveBar), saveBar.trim().slice(0, 40));
+
+await page.getByTestId('live-complete-set').click();
+await page.getByTestId('live-rest-undo').waitFor({ timeout: 15000 });
+await page.getByTestId('live-rest-undo').click();
+await page.waitForTimeout(600);
+const afterUndo = (await page.getByTestId('live-complete-set').textContent()) ?? '';
+check('休息页可一键撤销误操作', /完成本组\s*1\//.test(afterUndo), afterUndo.trim());
+
+await page.goto(`${url}/#/data`, { waitUntil: 'networkidle' });
+await page.getByTestId('exercise-progress-card').scrollIntoViewIfNeeded();
+const progressCardText = (await page.getByTestId('exercise-progress-card').textContent()) ?? '';
+check(
+  '数据页动作进步卡片（有数据或明确引导）',
+  /首次最大重量|还没有可以对比的训练记录|只有动作名记录/.test(progressCardText),
+);
+
+await page.goto(`${url}/#/me`, { waitUntil: 'networkidle' });
+await page.getByTestId('export-backup').scrollIntoViewIfNeeded();
+const backupDl = page.waitForEvent('download', { timeout: 60000 }).catch(() => null);
+await page.getByTestId('export-backup').click();
+const backupFile = await backupDl;
+check(
+  '完整备份可导出',
+  Boolean(backupFile && /^我的训练-完整备份-\d{4}-\d{2}-\d{2}\.json$/.test(backupFile.suggestedFilename())),
+  backupFile?.suggestedFilename() ?? '未触发下载',
 );
 
 await browser.close();

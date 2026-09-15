@@ -220,6 +220,25 @@ export interface CardioRecord {
   playMin?: number | null;
 }
 
+/** 训练记录中的单个动作实际完成情况（用于展示同一动作的进步） */
+export interface ExerciseSetRecord {
+  name: string;
+  kind: SessionKind;
+  sets: {
+    index: number;
+    weightKg: number | null;
+    reps: number | null;
+    durationSec?: number | null;
+    distanceKm?: number | null;
+    rpe?: number | null;
+    done: boolean;
+  }[];
+  /** 该动作的完成组数 / 计划组数 */
+  doneSets: number;
+  plannedSets: number;
+  status: ExerciseStatus;
+}
+
 export interface WorkoutSummary {
   id: string;
   sessionId: string;
@@ -238,6 +257,8 @@ export interface WorkoutSummary {
   /** 0~1 */
   completionRate: number;
   cardio: CardioRecord[];
+  /** 每个动作的实际组数据（v1.1 起保存，旧记录可能没有） */
+  exerciseSets?: ExerciseSetRecord[];
   bodyWeightKg?: number | null;
   rpe?: number | null;
   fatigue?: number | null;

@@ -34,7 +34,9 @@ test.describe('五个主页面基本可用', () => {
     await expect(start).toBeVisible();
     await expectTouchTargets(page, '[data-testid="start-training"]');
     await start.click();
-    await expect(page.getByText(/动作\s*1\s*\/\s*\d+/)).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByTestId('live-progress')).toContainText(/动作\s*1\s*\/\s*\d+/, {
+      timeout: 15_000,
+    });
     await expectNoHorizontalScroll(page);
     await page.screenshot({
       path: `test-results/screens/${test.info().project.name}-live.png`,

@@ -3,7 +3,7 @@
  * 今日状态 / 今日计划 / 体重 / 恢复状态 / 大号「开始今天的训练」
  * 数据全部读写 IndexedDB，刷新、锁屏、关闭后不丢失。
  */
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Page } from '../components/Page';
 import { PdfDropZone, PdfImportButton } from '../components/PdfImportButton';
@@ -11,6 +11,7 @@ import {
   Button,
   Card,
   Chip,
+  Confirm,
   EmptyState,
   ListRow,
   NumberInput,
@@ -22,13 +23,14 @@ import {
 } from '../components/ui';
 import { IconFlame, IconPlay, IconTrophy } from '../components/icons';
 import { exportPlanPdf } from '../lib/report/exportPdf';
-import { buildLiveSession, sessionProgress } from '../lib/session';
+import { buildLiveSession, elapsedSec, sessionProgress } from '../lib/session';
 import {
   KIND_EMOJI,
   addDays,
   dayDiff,
   formatDateCN,
   formatDateShort,
+  formatDurationCN,
   formatNumber,
   formatVolume,
   kindIsCardio,
@@ -37,7 +39,8 @@ import {
 } from '../lib/format';
 import { useAppData } from '../state/AppData';
 import { dailyProgress } from '../lib/summary/sections';
-import { SESSION_KIND_LABEL, type ISODate, type TrainingPlan, type WorkoutSummary } from '../types';
+import { allTimeStats } from '../lib/progress';
+import type { ISODate, TrainingPlan, WorkoutSummary } from '../types';
 
 /** 今日计划：优先今天，其次最近的未来计划，最后回退到最近一次计划 */
 function pickTodayPlan(plans: TrainingPlan[], today: ISODate): TrainingPlan | null {
@@ -125,6 +128,8 @@ export default function HomePage() {
     [summaries, today],
   );
   const weekVolume = weekSummaries.reduce((n, s) => n + (s.totalVolumeKg || 0), 0);
+  const weekDurationSec = weekSummaries.reduce((n, s) => n + (s.totalDurationSec || 0), 0);
+  const allStats = useMemo(() => allTimeStats(summaries), [summaries]);
   const streak = useMemo(() => computeStreak(summaries, today), [summaries, today]);
   const recent = useMemo(
     () => [...summaries].sort((a, b) => (a.date < b.date ? 1 : -1)).slice(0, 3),
@@ -133,6 +138,28 @@ export default function HomePage() {
 
   const liveActive = liveSession != null && (liveSession.status === 'active' || liveSession.status === 'paused');
   const progress = liveActive && liveSession ? sessionProgress(liveSession) : null;
+  /** 进行中训练的已用时长（基于时间戳，锁屏后回来也准确） */
+  const [liveNow, setLiveNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!liveActive) return;
+    const id = window.setInterval(() => setLiveNow(Date.now()), 1000);
+    return () => window.clearInterval(id);
+  }, [liveActive]);
+  const liveElapsedSec = liveActive && liveSession ? elapsedSec(liveSession, liveNow) : 0;
+
+  /** 重新开始：丢弃当前进度，用今天的计划重新建一个会话（会二次确认） */
+  const [restartOpen, setRestartOpen] = useState(false);
+  async function restartTraining(_target: TrainingPlan) {
+    setRestartOpen(true);
+  }
+  async function confirmRestart() {
+    if (!plan) return;
+    const session = buildLiveSession(plan, { defaultRestSec: settings.defaultRestSec });
+    await setLiveSession(session);
+    setRestartOpen(false);
+    toast('已重新开始今天的训练', 'success');
+    navigate('/live');
+  }
   const currentWeight = metric?.weightKg ?? latestWeight?.weightKg ?? null;
   const targetWeight = settings.bodyWeightGoalKg ?? null;
 
@@ -189,6 +216,120 @@ export default function HomePage() {
         ) : null
       }
     >
+      {/* 今天练什么（首屏最重要的一块） */}
+      <Card className="page-enter hero-training" data-testid="today-hero">
+        <div className="row-between" style={{ alignItems: 'flex-start' }}>
+          <div style={{ minWidth: 0 }}>
+            <div className="small muted">今天练什么</div>
+            <div
+              className="exercise-name"
+              style={{ fontSize: 21, marginTop: 2 }}
+              data-testid="today-plan-title"
+            >
+              {liveActive && liveSession
+                ? `${KIND_EMOJI[liveSession.kind]} ${liveSession.planTitle}`
+                : plan
+                  ? `${KIND_EMOJI[plan.kind]} ${plan.title}`
+                  : '今天还没有安排'}
+            </div>
+          </div>
+          {liveActive && <Chip tone="orange">进行中</Chip>}
+        </div>
+
+        {liveActive && liveSession && progress ? (
+          <div className="stat-grid three" style={{ marginTop: 12 }}>
+            <Stat label="已完成" value={`${progress.doneSets}/${progress.plannedSets}`} unit="组" />
+            <Stat label="动作" value={`${progress.index + 1}/${progress.total}`} />
+            <Stat
+              label="已训练"
+              value={formatDurationCN(liveElapsedSec)}
+            />
+          </div>
+        ) : plan ? (
+          <div className="stat-grid three" style={{ marginTop: 12 }}>
+            <Stat
+              label="预计时长"
+              value={plan.estimatedMinutes ? `${plan.estimatedMinutes}` : '—'}
+              unit={plan.estimatedMinutes ? '分钟' : undefined}
+            />
+            <Stat label="动作" value={plan.exercises.length} unit="个" />
+            <Stat label="热身" value={plan.warmup.length} unit="项" />
+          </div>
+        ) : null}
+
+        {plan && !liveActive && (
+          <div style={{ marginTop: 10 }}>
+            {plan.exercises.slice(0, 3).map((ex) => (
+              <div key={ex.id} className="home-ex-row">
+                <span className="truncate" style={{ fontWeight: 550 }}>
+                  {ex.name}
+                </span>
+                <span className="tiny muted nowrap">{targetSummary(ex.target)}</span>
+              </div>
+            ))}
+            {plan.exercises.length > 3 && (
+              <div className="tiny muted" style={{ paddingTop: 4 }}>
+                还有 {plan.exercises.length - 3} 个动作
+              </div>
+            )}
+          </div>
+        )}
+
+        {plan || liveActive ? (
+          <>
+            <Button
+              variant="primary"
+              size="xl"
+              block
+              style={{ marginTop: 14 }}
+              onClick={() => void startTraining()}
+              data-testid="start-training"
+            >
+              <IconPlay width={24} height={24} style={{ marginRight: 8 }} />
+              {liveActive && progress
+                ? `继续训练（${progress.doneSets}/${progress.plannedSets} 组）`
+                : '开始训练'}
+            </Button>
+            {liveActive && plan && (
+              <Button
+                block
+                size="lg"
+                style={{ marginTop: 10 }}
+                data-testid="restart-training"
+                onClick={() => void restartTraining(plan)}
+              >
+                重新开始这个计划
+              </Button>
+            )}
+            {plan && (
+              <button
+                className="tiny muted center"
+                style={{ width: '100%', marginTop: 10 }}
+                onClick={() => setDetailPlan(plan)}
+              >
+                查看完整计划（{plan.exercises.length} 个动作）›
+              </button>
+            )}
+          </>
+        ) : (
+          <div className="col" style={{ gap: 10, marginTop: 14 }}>
+            <PdfImportButton
+              variant="primary"
+              size="lg"
+              block
+              label="导入 ChatGPT PDF 计划"
+              testId="import-pdf-empty"
+            />
+            <Button block size="lg" onClick={() => navigate('/train')}>
+              手动新建训练计划
+            </Button>
+            <div className="tiny muted center">
+              导入或新建后，这里会显示预计时长和开始训练按钮
+            </div>
+          </div>
+        )}
+      </Card>
+
       {/* 今日状态 */}
       <Card className="page-enter">
         <div className="row-between" style={{ marginBottom: 12 }}>
@@ -216,104 +357,6 @@ export default function HomePage() {
           <Stat label="恢复" value={metric?.recovery != null ? `${metric.recovery}/5` : '—'} />
         </div>
       </Card>
-
-      {/* 未完成的训练 */}
-      {liveActive && liveSession && progress && (
-        <Card className="live-banner">
-          <div className="row-between">
-            <div style={{ minWidth: 0 }}>
-              <div className="small" style={{ color: 'var(--accent)', fontWeight: 650 }}>
-                有未完成的训练
-              </div>
-              <div className="strong truncate" style={{ fontSize: 17, marginTop: 2 }}>
-                {liveSession.planTitle}
-              </div>
-              <div className="tiny muted" style={{ marginTop: 2 }}>
-                已完成 {progress.doneSets}/{progress.plannedSets} 组 ·{' '}
-                {liveSession.status === 'paused' ? '已暂停' : '进行中'}
-              </div>
-            </div>
-            <Button variant="primary" onClick={() => navigate('/live')}>
-              继续
-            </Button>
-          </div>
-        </Card>
-      )}
-
-      {/* 今日计划 */}
-      <SectionTitle action={plan ? '查看详情' : undefined} onAction={() => plan && setDetailPlan(plan)}>
-        今日计划
-      </SectionTitle>
-      {plan ? (
-        <Card>
-          <div className="row-between" style={{ alignItems: 'flex-start' }}>
-            <div style={{ minWidth: 0 }}>
-              <div
-                className="exercise-name"
-                style={{ fontSize: 19 }}
-                data-testid="today-plan-title"
-              >
-                {KIND_EMOJI[plan.kind]} {plan.title}
-              </div>
-              <div className="tiny muted" style={{ marginTop: 4 }}>
-                {plan.date ? formatDateCN(plan.date) : '未设置日期'} ·{' '}
-                {SESSION_KIND_LABEL[plan.kind]}
-                {plan.estimatedMinutes ? ` · 预计 ${plan.estimatedMinutes} 分钟` : ''}
-              </div>
-            </div>
-          </div>
-          <div className="wrap" style={{ gap: 6, marginTop: 10 }}>
-            <Chip>{plan.exercises.length} 个动作</Chip>
-            {plan.warmup.length > 0 && <Chip tone="green">热身 {plan.warmup.length} 项</Chip>}
-            {plan.exercises.some((e) => e.target.rpe != null) && (
-              <Chip tone="purple">
-                RPE {Math.max(...plan.exercises.map((e) => e.target.rpe ?? 0))} 上限
-              </Chip>
-            )}
-          </div>
-          <div style={{ marginTop: 12 }}>
-            {plan.exercises.slice(0, 4).map((ex) => (
-              <div key={ex.id} className="home-ex-row">
-                <span className="truncate" style={{ fontWeight: 550 }}>
-                  {ex.name}
-                </span>
-                <span className="tiny muted nowrap">{targetSummary(ex.target)}</span>
-              </div>
-            ))}
-            {plan.exercises.length > 4 && (
-              <div className="tiny muted" style={{ paddingTop: 6 }}>
-                还有 {plan.exercises.length - 4} 个动作…
-              </div>
-            )}
-          </div>
-          <Button variant="primary" size="xl" block onClick={() => void startTraining()} data-testid="start-training">
-            <IconPlay width={22} height={22} style={{ marginRight: 8 }} />
-            {liveActive ? '继续今天的训练' : '开始今天的训练'}
-          </Button>
-        </Card>
-      ) : (
-        <Card>
-          <EmptyState
-            emoji="📄"
-            title="今天还没有训练计划"
-            desc="从 ChatGPT 导出的 PDF 可以直接导入，识别后确认再保存"
-            action={
-              <div className="col" style={{ gap: 10, width: '100%' }}>
-                <PdfImportButton
-                  variant="primary"
-                  size="lg"
-                  block
-                  label="导入 ChatGPT PDF"
-                  testId="import-pdf-empty"
-                />
-                <Button block size="lg" onClick={() => navigate('/train')}>
-                  新建训练计划
-                </Button>
-              </div>
-            }
-          />
-        </Card>
-      )}
 
       {/* 恢复状态 */}
       <SectionTitle>恢复状态</SectionTitle>
@@ -395,15 +438,41 @@ export default function HomePage() {
           </div>
         </Card>
         <Card flat>
-          <div className="small muted">本周训练量</div>
+          <div className="small muted">本周训练时长</div>
           <div className="strong" style={{ fontSize: 26, marginTop: 4 }}>
-            {weekVolume > 0 ? formatVolume(weekVolume) : '—'}
+            {weekDurationSec > 0 ? formatDurationCN(weekDurationSec) : '—'}
           </div>
           <div className="tiny muted" style={{ marginTop: 2 }}>
-            连续打卡 {streak} 天
+            {weekVolume > 0 ? `容量 ${formatVolume(weekVolume)}` : '完成训练后自动统计'}
           </div>
         </Card>
       </div>
+      <Card flat>
+        <div className="row-between">
+          <div>
+            <div className="small muted">累计训练</div>
+            <div className="strong" style={{ fontSize: 24, marginTop: 4 }}>
+              {allStats.sessions}
+              <span className="unit"> 次</span>
+              <span className="muted" style={{ fontSize: 15, marginLeft: 8 }}>
+                {allStats.durationSec > 0 ? formatDurationCN(allStats.durationSec) : '—'}
+              </span>
+            </div>
+          </div>
+          <div style={{ textAlign: 'right' }}>
+            <div className="small muted">连续打卡</div>
+            <div className="strong" style={{ fontSize: 22, marginTop: 4 }}>
+              {streak}
+              <span className="unit"> 天</span>
+            </div>
+          </div>
+        </div>
+        {allStats.sessions === 0 && (
+          <div className="tiny muted" style={{ marginTop: 6 }}>
+            完成第一次训练后，这里会显示累计次数与时长
+          </div>
+        )}
+      </Card>
 
       {targetWeight != null && currentWeight != null && (
         <Card>
@@ -557,6 +626,20 @@ export default function HomePage() {
           </div>
         )}
       </Sheet>
+
+      <Confirm
+        open={restartOpen}
+        title="重新开始今天的训练？"
+        message={
+          progress
+            ? `当前进度（已完成 ${progress.doneSets}/${progress.plannedSets} 组）会被清除，改用今天的计划从头开始。这一步无法撤销。`
+            : ''
+        }
+        confirmText="重新开始"
+        danger
+        onCancel={() => setRestartOpen(false)}
+        onConfirm={() => void confirmRestart()}
+      />
     </Page>
   );
 }
