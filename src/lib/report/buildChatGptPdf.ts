@@ -1,6 +1,6 @@
 /** 「给 ChatGPT 分析」报告 PDF：真实文字层（可复制、可搜索），按日期从早到晚排版 */
 import { PDFDict, PDFDocument, PDFName } from 'pdf-lib';
-import type { ISODate } from '../../types';
+import { SESSION_KIND_LABEL, type ISODate } from '../../types';
 import { formatDateCN, formatDurationCN, formatNumber, parseISODate } from '../format';
 import { Report, type ReportFonts } from './buildReportPdf';
 import {
@@ -144,6 +144,21 @@ export function dayBlocks(day: DayBundle, include: ExportInclude): Block[] {
       val('RPE / 主观强度', log?.training?.rpe ?? summary?.rpe ?? log?.rpe ?? null),
       val('疼痛与不适部位', (log?.training?.painSites ?? []).join('、') || log?.body?.injuryPain || null),
     );
+    // 场次明细（历史报告导入的多场训练）
+    for (const s of log?.training?.sessions ?? []) {
+      const bits = [
+        s.kind ? SESSION_KIND_LABEL[s.kind] : '',
+        s.durationMin ? `${formatNumber(s.durationMin)} 分钟` : '',
+        s.distanceKm ? `${formatNumber(s.distanceKm, 2)} km` : '',
+        s.kcal ? `动态 ${formatNumber(s.kcal)} kcal` : '',
+        s.avgHr ? `平均心率 ${formatNumber(s.avgHr)}` : '',
+        s.maxHr ? `最高心率 ${formatNumber(s.maxHr)}` : '',
+        s.paceText ? `配速 ${s.paceText}` : '',
+        s.rpe != null ? `RPE ${s.rpe}` : '',
+        (s.note ?? '').trim(),
+      ].filter(Boolean);
+      lines.push(`场次·${s.name}：${bits.join('，') || MISSING}`);
+    }
     blocks.push({ title: '训练情况', lines });
   }
 
@@ -157,6 +172,7 @@ export function dayBlocks(day: DayBundle, include: ExportInclude): Block[] {
         val('步数', w.steps, ' 步'),
         val('运动分钟数', w.exerciseMinutes, ' 分钟'),
         val('站立时间', w.standHours, ' 小时'),
+        val('移动距离', w.distanceKm, ' km'),
         val('平均心率', w.avgHr, ' bpm'),
         val('最高心率', w.maxHr, ' bpm'),
         val('静息心率', w.restingHr, ' bpm'),
@@ -197,6 +213,7 @@ export function dayBlocks(day: DayBundle, include: ExportInclude): Block[] {
       lines: [
         val('体重', b.weightKg ?? day.metric?.weightKg ?? null, ' kg'),
         val('体脂率', b.bodyFatPct ?? day.metric?.bodyFatPct ?? null, ' %'),
+        val('疲劳程度（0~10）', b.fatigue10, ' / 10'),
         val('疲劳程度', b.fatigue, ' / 5'),
         val('肌肉酸痛', b.soreness ?? day.metric?.soreness ?? null, ' / 5'),
         val('精神状态', b.mood, ' / 5'),
@@ -229,15 +246,26 @@ export function dayBlocks(day: DayBundle, include: ExportInclude): Block[] {
         val('补剂清单', extraSupp.length ? extraSupp.join('、') : null),
         val('补剂情况', log?.noSupplements ? '今天没吃补剂' : null),
         val('其他补剂', s.others ?? null),
+        val('补剂备注', s.note ?? null),
         val('饮食备注', m.note ?? null),
       ],
     });
   }
 
   if (include.notes) {
+    const reports = log?.reportImports ?? [];
     blocks.push({
       title: '用户备注（原话）',
-      lines: [log?.freeNote?.trim() || MISSING],
+      lines: [
+        log?.freeNote?.trim() || MISSING,
+        ...reports.flatMap((r) => [
+          `来源报告：《${r.title}》（原文 PDF 保存在本机）`,
+          `报告评分：${
+            (r.scores ?? []).map((s) => `${s.label} ${formatNumber(s.value)}/${s.max}`).join('、') ||
+            MISSING
+          }`,
+        ]),
+      ],
     });
   }
 

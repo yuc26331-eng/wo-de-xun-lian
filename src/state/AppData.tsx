@@ -56,6 +56,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   unit: 'kg',
   defaultRestSec: 90,
   bodyWeightGoalKg: 70,
+  /** 目标体脂率（%）：低于 12% */
+  bodyFatGoalPct: 12,
   weeklyFrequencyGoal: 5,
   installPromptDismissed: false,
   installPromptSeenAt: null,
@@ -647,12 +649,18 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const saveSettings = useCallback(async (patch: Partial<AppSettings>) => {
-    setSettings((prev) => {
-      const next = { ...prev, ...patch, id: 'app' as const, updatedAt: nowISO() };
-      void dbPut('settings', next);
-      return next;
-    });
-  }, []);
+    // 以数据库里的最新一行为基准合并，避免内存里的旧值把刚写入的目标/清理标记覆盖掉
+    const row = (await dbGetAll('settings'))[0];
+    const next: AppSettings = {
+      ...DEFAULT_SETTINGS,
+      ...(row ?? settings),
+      ...patch,
+      id: 'app',
+      updatedAt: nowISO(),
+    };
+    await dbPut('settings', next);
+    setSettings(next);
+  }, [settings]);
 
   const buildBackup = useCallback((): BackupFile => {
     return {

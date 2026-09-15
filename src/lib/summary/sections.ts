@@ -54,6 +54,7 @@ export const SECTIONS: SectionMeta[] = [
       'steps',
       'exerciseMinutes',
       'standHours',
+      'distanceKm',
       'avgHr',
       'maxHr',
       'restingHr',
@@ -88,6 +89,7 @@ export const SECTIONS: SectionMeta[] = [
     fields: [
       'weightKg',
       'bodyFatPct',
+      'fatigue10',
       'fatigue',
       'soreness',
       'mood',
@@ -162,6 +164,7 @@ export function flattenSection(
         creatineG: log.supplements?.creatineG ?? null,
         caffeineMg: log.supplements?.caffeineMg ?? null,
         others: log.supplements?.others ?? '',
+        supplementNote: log.supplements?.note ?? '',
         supplementsList: (log.supplementsList ?? []).map(
           (s) => `${s.name}${s.amount ? ` ${s.amount}${s.unit ?? ''}` : ''}`,
         ),

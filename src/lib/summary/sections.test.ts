@@ -75,7 +75,7 @@ describe('今日总结分区模型', () => {
     expect(partly.filled).toBeGreaterThan(empty.filled);
     const watch = partly.sections.find((s) => s.key === 'watch')!;
     expect(watch.filled).toBe(1);
-    expect(watch.total).toBe(12);
+    expect(watch.total).toBe(13);
   });
 
   it('摘要文字包含主要指标，没有记录时显示未记录', () => {

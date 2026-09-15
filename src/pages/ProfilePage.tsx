@@ -496,6 +496,14 @@ export default function ProfilePage() {
       <SectionTitle>数据管理</SectionTitle>
       <Card>
         <div className="col" style={{ gap: 10 }}>
+          <Button
+            block
+            size="lg"
+            data-testid="profile-history-import"
+            onClick={() => navigate('/import/history')}
+          >
+            导入历史报告 PDF（按日期归档）
+          </Button>
           <Button block size="lg" onClick={() => setConfirmSamples(true)}>
             重新载入示例数据
           </Button>

@@ -1,0 +1,16 @@
+{
+  "app": "wo-de-xun-lian",
+  "kind": "history-import",
+  "version": 1,
+  "algorithm": "AES-256-GCM",
+  "kdf": "PBKDF2-SHA256",
+  "iterations": 250000,
+  "salt": "fwGaBWln9XKx962hrLTdRQ==",
+  "iv": "wqWGm87eDnS4nMB4",
+  "file": "history.bin",
+  "days": 15,
+  "dateStart": "2026-08-04",
+  "dateEnd": "2026-09-10",
+  "generatedAt": "2026-09-15T16:15:46.008Z",
+  "note": "本机解析的历史训练总结（含原始 PDF），需要导入码解密"
+}

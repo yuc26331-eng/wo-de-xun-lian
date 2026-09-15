@@ -171,7 +171,8 @@ test.describe('训练管理：编辑 / 重命名 / 复制 / 删除', () => {
     await page.getByText('下肢力量（改名测试）').first().click();
     await page.getByRole('button', { name: '删除计划' }).click();
     await expect(page.getByText(/将删除「下肢力量（改名测试）」/)).toBeVisible();
-    await expect(page.getByText(/2026年9月20日|2026年9月15日/)).toBeVisible();
+    // 确认框必须写明日期（示例计划的日期是相对"今天"生成的，所以只校验格式）
+    await expect(page.getByText(/2026年\d{1,2}月\d{1,2}日/).first()).toBeVisible();
     await page.getByRole('button', { name: '删除', exact: true }).click();
     await expect(page.getByText('计划已删除')).toBeVisible();
   });

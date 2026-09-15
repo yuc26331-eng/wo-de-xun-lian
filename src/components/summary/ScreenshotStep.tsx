@@ -44,6 +44,7 @@ const WATCH_FIELDS: { key: keyof WatchData; label: string; unit?: string; dec?: 
   { key: 'totalEnergyKcal', label: '总消耗', unit: 'kcal', dec: 0 },
   { key: 'exerciseMinutes', label: '运动分钟', unit: '分钟', dec: 0 },
   { key: 'standHours', label: '站立', unit: '小时', dec: 0 },
+  { key: 'distanceKm', label: '移动距离', unit: 'km', dec: 2 },
   { key: 'steps', label: '步数', unit: '步', dec: 0 },
   { key: 'avgHr', label: '平均心率', unit: 'bpm', dec: 0 },
   { key: 'maxHr', label: '最高心率', unit: 'bpm', dec: 0 },

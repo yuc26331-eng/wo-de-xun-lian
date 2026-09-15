@@ -499,6 +499,18 @@ export function SummaryForm({
         </Row>
         <Row>
           <div className="grow">
+            <Field label="移动距离（km）">
+              <NumberInput
+                value={watch.distanceKm ?? null}
+                dec={2}
+                onChange={(v) => setSection('watch', { distanceKm: v })}
+                testId="watch-distance"
+              />
+            </Field>
+          </div>
+        </Row>
+        <Row>
+          <div className="grow">
             <Field label="心率恢复">
               <NumberInput value={watch.hrRecovery ?? null} dec={0} onChange={(v) => setSection('watch', { hrRecovery: v })} />
             </Field>
@@ -629,6 +641,21 @@ export function SummaryForm({
             <Scale value={body.soreness ?? null} onChange={(v) => setSection('body', { soreness: v })} />
           </div>
         </div>
+        <Row>
+          <div className="grow">
+            <Field
+              label="疲劳程度（0~10，报告常用）"
+              hint="和上面的 1~5 分制并存：报告里给的是十分制就填这里"
+            >
+              <NumberInput
+                value={body.fatigue10 ?? null}
+                dec={1}
+                onChange={(v) => setSection('body', { fatigue10: v })}
+                testId="body-fatigue10"
+              />
+            </Field>
+          </div>
+        </Row>
         <div className="form-row" style={{ marginTop: 12 }}>
           <div className="grow">
             <div className="small muted" style={{ marginBottom: 6 }}>精神状态</div>
@@ -729,6 +756,19 @@ export function SummaryForm({
           <div className="grow">
             <Field label="其他补剂">
               <TextInput value={supplements.others ?? ''} onChange={(v) => setSection('supplements', { others: v })} placeholder="例如：维生素 D、镁" />
+            </Field>
+          </div>
+        </Row>
+        <Row>
+          <div className="grow">
+            <Field label="补剂备注">
+              <TextArea
+                value={supplements.note ?? ''}
+                onChange={(v) => setSection('supplements', { note: v })}
+                rows={2}
+                placeholder="例如：训练后一杯蛋白粉，肌酸今天没喝"
+                testId="supplements-note"
+              />
             </Field>
           </div>
         </Row>

@@ -636,6 +636,7 @@ function StepIntensity({
 }) {
   const rpe = draft.training?.rpe ?? null;
   const body = draft.body ?? {};
+  const fatigue10 = body.fatigue10 ?? null;
   const scale = (
     label: string,
     value: number | null | undefined,
@@ -688,6 +689,27 @@ function StepIntensity({
               : rpe <= 8
                 ? `${rpe} · 偏硬`
                 : `${rpe} · 接近极限`}
+      </div>
+
+      <div style={{ marginTop: 14 }}>
+        <div className="small muted" style={{ marginBottom: 6 }}>
+          疲劳程度（0~10，报告里常用十分制；和下面的 1~5 分制并存）
+        </div>
+        <div className="rpe-scale" data-testid="wizard-fatigue10">
+          {Array.from({ length: 11 }).map((_, n) => (
+            <button
+              key={n}
+              className={fatigue10 === n ? 'active' : ''}
+              data-testid={`wizard-fatigue10-${n}`}
+              onClick={() => onBody({ fatigue10: fatigue10 === n ? null : n })}
+            >
+              {n}
+            </button>
+          ))}
+        </div>
+        <div className="tiny muted" style={{ marginTop: 6 }}>
+          {fatigue10 == null ? '未填写（可跳过）' : `当前：${fatigue10} / 10`}
+        </div>
       </div>
 
       {scale('疲劳程度', body.fatigue, 'fatigue', ['很轻', '轻', '一般', '累', '很累'])}
@@ -1023,6 +1045,7 @@ function StepReviewPanel({
         {line('运动分钟', watch.exerciseMinutes ? `${watch.exerciseMinutes} 分钟` : null)}
         {line('步数', watch.steps ?? null)}
         {line('站立', watch.standHours ? `${watch.standHours} 小时` : null)}
+        {line('移动距离', watch.distanceKm ? `${formatNumber(watch.distanceKm, 2)} km` : null)}
         {line('平均 / 最高心率', watch.avgHr || watch.maxHr ? `${watch.avgHr ?? '—'} / ${watch.maxHr ?? '—'} bpm` : null)}
         {line('静息心率', watch.restingHr ? `${watch.restingHr} bpm` : null)}
         {line('HRV', watch.hrvMs ? `${watch.hrvMs} ms` : null)}
@@ -1039,6 +1062,7 @@ function StepReviewPanel({
       <div className="summary-block">
         <h4>强度与身体</h4>
         {line('疲劳', body.fatigue ? `${body.fatigue} / 5` : null)}
+        {line('疲劳（0~10）', body.fatigue10 != null ? `${formatNumber(body.fatigue10)} / 10` : null)}
         {line('酸痛', body.soreness ? `${body.soreness} / 5` : null)}
         {line('恢复', body.recovery ? `${body.recovery} / 5` : null)}
         {line('体重 / 体脂', body.weightKg != null || body.bodyFatPct != null

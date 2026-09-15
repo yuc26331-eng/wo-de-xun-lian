@@ -290,6 +290,21 @@ function daySectionMarkdown(day: DayBundle, include: ExportInclude): string {
       out.push(line('RPE / 主观强度', rpe));
       const painSites = (log?.training?.painSites ?? []).join('、');
       out.push(line('疼痛与不适部位', painSites || text(log?.body?.injuryPain) || null));
+      // 场次明细（历史报告导入的多场训练：保留每场时长、距离、热量、心率、RPE）
+      for (const s of log?.training?.sessions ?? []) {
+        const bits = [
+          s.kind ? SESSION_KIND_LABEL[s.kind] : '',
+          s.durationMin ? `${formatNumber(s.durationMin)} 分钟` : '',
+          s.distanceKm ? `${formatNumber(s.distanceKm, 2)} km` : '',
+          s.kcal ? `动态 ${formatNumber(s.kcal)} kcal` : '',
+          s.avgHr ? `平均心率 ${formatNumber(s.avgHr)}` : '',
+          s.maxHr ? `最高心率 ${formatNumber(s.maxHr)}` : '',
+          s.paceText ? `配速 ${s.paceText}` : '',
+          s.rpe != null ? `RPE ${s.rpe}` : '',
+          text(s.note) || '',
+        ].filter(Boolean);
+        out.push(`- 场次·${s.name}：${bits.join('，') || MISSING}`);
+      }
     }
   }
 
@@ -302,6 +317,7 @@ function daySectionMarkdown(day: DayBundle, include: ExportInclude): string {
       line('步数', num(w.steps), ' 步'),
       line('运动分钟数', num(w.exerciseMinutes), ' 分钟'),
       line('站立时间', num(w.standHours), ' 小时'),
+      line('移动距离', num(w.distanceKm), ' km'),
       line('平均心率', num(w.avgHr), ' bpm'),
       line('最高心率', num(w.maxHr), ' bpm'),
       line('静息心率', num(w.restingHr), ' bpm'),
@@ -338,6 +354,7 @@ function daySectionMarkdown(day: DayBundle, include: ExportInclude): string {
     out.push(
       line('体重', num(b.weightKg) ?? num(day.metric?.weightKg), ' kg'),
       line('体脂率', num(b.bodyFatPct) ?? num(day.metric?.bodyFatPct), ' %'),
+      line('疲劳程度（0~10）', num(b.fatigue10), ' / 10'),
       line('疲劳程度', num(b.fatigue), ' / 5'),
       line('肌肉酸痛', num(b.soreness) ?? num(day.metric?.soreness), ' / 5'),
       line('精神状态', num(b.mood), ' / 5'),
@@ -365,6 +382,7 @@ function daySectionMarkdown(day: DayBundle, include: ExportInclude): string {
       line('补剂清单', extraSupp.length ? extraSupp.join('、') : null),
       line('补剂情况', text(m.noSupplements) || null),
       line('其他补剂', text(m.others) || null),
+      line('补剂备注', text(m.supplementNote) || null),
       line('饮食备注', text(m.note) || null),
     );
   }
@@ -373,6 +391,16 @@ function daySectionMarkdown(day: DayBundle, include: ExportInclude): string {
     out.push('### 用户备注（原话）');
     const free = log ? text(flattenSection(log, 'notes').freeNote) : '';
     out.push(free ? `> ${free}` : `- ${MISSING}`);
+    for (const rep of log?.reportImports ?? []) {
+      out.push(
+        `- 来源报告：《${rep.title}》（原文 PDF 保存在本机）`,
+        `- 报告评分：${
+          (rep.scores ?? [])
+            .map((s) => `${s.label} ${formatNumber(s.value)}/${s.max}`)
+            .join('、') || MISSING
+        }`,
+      );
+    }
   }
 
   return out.join('\n');

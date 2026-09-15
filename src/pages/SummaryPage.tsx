@@ -26,6 +26,7 @@ import { SummaryForm } from '../components/summary/SummaryForm';
 import { SummaryWizard } from '../components/summary/SummaryWizard';
 import { ExportDialog } from '../components/summary/ExportDialog';
 import { ImportChatGptReportButton } from '../components/ImportChatGptReportButton';
+import { ReportArchiveCard } from '../components/summary/ReportArchiveCard';
 import { useAppData } from '../state/AppData';
 import {
   KIND_EMOJI,
@@ -185,6 +186,17 @@ export default function SummaryPage() {
     (next: ISODate) => {
       const p = new URLSearchParams(params);
       p.set('date', next);
+      setParams(p, { replace: true });
+    },
+    [params, setParams],
+  );
+
+  /** 打开某一天：日期和 tab 一起改，避免两次 setParams 互相覆盖导致跳到"今天" */
+  const openDay = useCallback(
+    (next: ISODate) => {
+      const p = new URLSearchParams(params);
+      p.set('date', next);
+      p.set('tab', 'today');
       setParams(p, { replace: true });
     },
     [params, setParams],
@@ -351,6 +363,8 @@ export default function SummaryPage() {
           )}
 
           {/* 默认走逐步引导；需要一次改很多项时可以切到完整表单 */}
+          <ReportArchiveCard log={activeLog} date={activeDate} />
+
           {advanced ? (
             <>
               <div className="row-between" style={{ margin: '4px 0 8px' }}>
@@ -446,10 +460,7 @@ export default function SummaryPage() {
                 onMonthChange={setMonth}
                 hasRecord={(d) => logByDate.has(d) || summaryByDate.has(d)}
                 selected={activeDate}
-                onSelect={(d) => {
-                  setActiveDate(d);
-                  setTab('today');
-                }}
+                onSelect={(d) => openDay(d)}
               />
             )}
           </Card>
@@ -474,10 +485,7 @@ export default function SummaryPage() {
                   <div key={d} className="day-row" data-testid={`day-row-${d}`}>
                     <button
                       className="day-main"
-                      onClick={() => {
-                        setActiveDate(d);
-                        setTab('today');
-                      }}
+                      onClick={() => openDay(d)}
                     >
                       <span className="day-date">
                         {formatDateShort(d)}
@@ -519,6 +527,23 @@ export default function SummaryPage() {
           <Button block onClick={() => navigate('/history')}>
             查看训练历史与训练报告 PDF
           </Button>
+          <Card>
+            <div className="strong" style={{ marginBottom: 6 }}>
+              导入历史报告
+            </div>
+            <div className="tiny muted" style={{ marginBottom: 10, lineHeight: 1.7 }}>
+              把之前用 ChatGPT 整理的每日总结 PDF 导入成正式记录（按报告日期归档，训练 / Apple Watch /
+              睡眠 / 补剂会写进对应字段，原文与原始 PDF 一起保存；同一天只补空字段，不覆盖已有内容）。
+            </div>
+            <Button
+              block
+              size="lg"
+              data-testid="open-history-import"
+              onClick={() => navigate('/import/history')}
+            >
+              导入历史报告（需要导入码）
+            </Button>
+          </Card>
         </div>
       )}
 
@@ -585,8 +610,7 @@ export default function SummaryPage() {
           hasRecord={(d) => logByDate.has(d) || summaryByDate.has(d)}
           selected={activeDate}
           onSelect={(d) => {
-            setActiveDate(d);
-            setTab('today');
+            openDay(d);
             setCalendarOpen(false);
           }}
         />

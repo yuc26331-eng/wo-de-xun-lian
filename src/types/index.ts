@@ -300,6 +300,8 @@ export interface WatchData {
   steps?: number | null;
   exerciseMinutes?: number | null;
   standHours?: number | null;
+  /** 手表记录的移动距离（km） */
+  distanceKm?: number | null;
   avgHr?: number | null;
   maxHr?: number | null;
   restingHr?: number | null;
@@ -332,6 +334,8 @@ export interface SleepData {
 export interface BodyRecovery {
   weightKg?: number | null;
   bodyFatPct?: number | null;
+  /** 疲劳程度（0~10，用于报告里给出的十分制评分，与 1~5 的 fatigue 并存） */
+  fatigue10?: number | null;
   fatigue?: number | null;
   soreness?: number | null;
   mood?: number | null;
@@ -360,6 +364,8 @@ export interface SupplementLog {
   /** 咖啡因 mg */
   caffeineMg?: number | null;
   others?: string;
+  /** 补剂备注（报告原文里关于补剂的原话） */
+  note?: string;
 }
 
 export interface TrainingSection {
@@ -383,6 +389,55 @@ export interface TrainingSection {
   sessionDurationsMin?: number[];
   /** 休息日：今天未训练 */
   restDay?: boolean;
+  /** 当天每场训练的明细（历史报告导入时保留场次级数据） */
+  sessions?: TrainingSessionDetail[];
+}
+
+/** 一天当中某一场训练的明细（场次级数据，来自训练记录或历史报告） */
+export interface TrainingSessionDetail {
+  name: string;
+  kind?: SessionKind;
+  durationMin?: number | null;
+  distanceKm?: number | null;
+  /** 动态消耗（千卡） */
+  kcal?: number | null;
+  avgHr?: number | null;
+  maxHr?: number | null;
+  rpe?: number | null;
+  /** 配速描述，例如 '5分54秒/公里' */
+  paceText?: string;
+  note?: string;
+}
+
+/** 报告里给出的评分项（例如 训练质量 8.1/10） */
+export interface ReportScore {
+  label: string;
+  value: number;
+  max: number;
+}
+
+/**
+ * 历史文档导入留档（PDF 报告原文）。
+ * 只用于「查看与追溯」，不参与任何自动计算，避免把报告结论当成实测数据。
+ */
+export interface DailyDocumentImport {
+  /** 报告标题 */
+  title: string;
+  /** 原始文件名 */
+  fileName: string;
+  importedAt: ISODateTime;
+  /** 数据来源：历史 PDF 报告 */
+  source: 'history-pdf';
+  /** PDF 中提取出的全文（文字层） */
+  reportText: string;
+  /** 报告中的总结、建议原文 */
+  note?: string;
+  /** 报告中的评分项 */
+  scores?: ReportScore[];
+  /** 原始 PDF 大小（字节） */
+  pdfSize?: number;
+  /** 原始 PDF 在附件表中的 id */
+  attachmentId?: string;
 }
 
 export type AttachmentKind = 'watch' | 'sleep' | 'other';
@@ -441,6 +496,8 @@ export interface DailyLog {
   noSupplements?: boolean;
   /** 归档时间（点击「保存今日总结」后写入） */
   finalizedAt?: ISODateTime;
+  /** 历史报告（PDF）导入留档：原文、评分与附件引用（同一天可以有多份） */
+  reportImports?: DailyDocumentImport[];
   /** —— v1 兼容字段（旧数据继续可用） —— */
   weightKg?: number | null;
   trainingContent?: string;
