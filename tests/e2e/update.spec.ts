@@ -78,6 +78,7 @@ test.describe('应用内更新 - 完整流程（禁用 SW 以模拟新版本）'
     // 1) 先写入一条用户数据，验证更新不会清除数据
     await page.goto('/#/summary');
     await page.getByTestId('summary-start').click();
+    await page.getByTestId('wizard-training-more').click();
     await page.getByTestId('wizard-training-items').fill('更新前写入的训练内容');
     await expect(page.getByTestId('wizard-save-status')).toContainText('已保存', {
       timeout: 15_000,
@@ -129,6 +130,8 @@ test.describe('应用内更新 - 完整流程（禁用 SW 以模拟新版本）'
     await page.goto('/#/summary');
     const startButton = page.getByTestId('summary-start');
     if (await startButton.isVisible().catch(() => false)) await startButton.click();
+    const more = page.getByTestId('wizard-training-more');
+    if (await more.isVisible().catch(() => false)) await more.click();
     await expect(page.getByTestId('wizard-training-items')).toHaveValue('更新前写入的训练内容', {
       timeout: 20_000,
     });

@@ -32,9 +32,18 @@ test.describe('今日总结：逐步引导', () => {
 
     // ① 训练
     await expect(page.getByTestId('wizard-progress')).toContainText('第 1 / 7 步');
+    // 训练改为"每次训练一张卡片"，训练次数由卡片数量自动统计
+    await page.getByTestId('session-add').click();
+    await page.getByTestId('session-name-0').fill('下肢力量');
+    await page.getByTestId('session-duration-0').fill('60');
+    await page.getByTestId('session-start-0').fill('09:00');
+    await page.getByTestId('session-add').click();
+    await page.getByTestId('session-name-1').fill('晚间核心');
+    await page.getByTestId('session-start-1').fill('19:00');
+    await page.getByTestId('session-duration-1').fill('30');
+    await expect(page.getByTestId('session-count')).toContainText('共 2 次训练');
+    await page.getByTestId('wizard-training-more').click();
     await page.getByTestId('wizard-training-items').fill('下肢力量');
-    await page.getByTestId('wizard-training-count').fill('2');
-    await page.getByTestId('wizard-training-durations').fill('60, 30');
     await expect(page.getByTestId('wizard-save-status')).toContainText(/保存|已保存/, {
       timeout: 15_000,
     });
@@ -69,6 +78,8 @@ test.describe('今日总结：逐步引导', () => {
     await expect(page.getByTestId('wizard-progress')).toContainText('第 7 / 7 步');
     const review = page.getByTestId('wizard-review');
     await expect(review).toContainText('下肢力量');
+    await expect(review).toContainText('09:00');
+    await expect(review).toContainText('19:00');
     await expect(review).toContainText('60 分钟');
     await expect(review).toContainText('8'); // RPE
     await expect(review).toContainText('蛋白粉');
@@ -94,6 +105,9 @@ test.describe('今日总结：逐步引导', () => {
   test('草稿恢复：填到第 4 步刷新后继续上次进度', async ({ page }) => {
     await page.goto('/#/summary');
     await page.getByTestId('summary-start').click();
+    await page.getByTestId('session-add').click();
+    await page.getByTestId('session-name-0').fill('草稿恢复测试');
+    await page.getByTestId('wizard-training-more').click();
     await page.getByTestId('wizard-training-items').fill('草稿恢复测试');
     await page.getByTestId('wizard-next').click();
     await page.getByTestId('wizard-skip').click();
@@ -112,6 +126,8 @@ test.describe('今日总结：逐步引导', () => {
     await page.getByTestId('wizard-prev').click();
     await page.getByTestId('wizard-prev').click();
     await page.getByTestId('wizard-prev').click();
+    await expect(page.getByTestId('session-name-0')).toHaveValue('草稿恢复测试');
+    await page.getByTestId('wizard-training-more').click();
     await expect(page.getByTestId('wizard-training-items')).toHaveValue('草稿恢复测试');
   });
 
@@ -146,7 +162,7 @@ test.describe('Apple Watch 截图：真实识别与纠错', () => {
     await expect(page.getByTestId('ocr-field-watch-restingHr')).toHaveValue('52');
     await expect(page.getByTestId('ocr-field-watch-hrvMs')).toHaveValue('64');
     await expect(page.getByTestId('ocr-field-watch-bloodOxygenPct')).toHaveValue('97');
-    await expect(page.getByText(/识别到 \d+ 项数据/)).toBeVisible();
+    await expect(page.getByText(/识别到 \d+ 项/)).toBeVisible();
 
     // 识别结果可以人工纠正
     await page.getByTestId('ocr-field-watch-steps').fill('9500');
@@ -167,6 +183,9 @@ test.describe('数据清理与目标', () => {
     // 先制造一条训练记录与今日总结
     await page.goto('/#/summary');
     await page.getByTestId('summary-start').click();
+    await page.getByTestId('session-add').click();
+    await page.getByTestId('session-name-0').fill('清理前训练');
+    await page.getByTestId('wizard-training-more').click();
     await page.getByTestId('wizard-training-items').fill('清理前训练');
     await expect(page.getByTestId('wizard-save-status')).toContainText('已保存', {
       timeout: 15_000,

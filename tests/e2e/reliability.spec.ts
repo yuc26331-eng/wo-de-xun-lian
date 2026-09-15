@@ -108,6 +108,7 @@ test.describe('备份与恢复', () => {
     // 先写一条每日记录，验证恢复不会丢数据
     await page.goto('/#/summary');
     await page.getByTestId('summary-start').click();
+    await page.getByTestId('wizard-training-more').click();
     await page.getByTestId('wizard-training-items').fill('备份前写入的训练内容');
     await expect(page.getByTestId('wizard-save-status')).toContainText('已保存', {
       timeout: 15_000,
@@ -136,6 +137,9 @@ test.describe('备份与恢复', () => {
     // 草稿会自动恢复到上次步骤；只有全新的一天才需要点「开始今日总结」
     const startButton = page.getByTestId('summary-start');
     if (await startButton.isVisible().catch(() => false)) await startButton.click();
+    // 全天补充是可折叠的，先展开才能看到汇总字段
+    const more = page.getByTestId('wizard-training-more');
+    if (await more.isVisible().catch(() => false)) await more.click();
     await expect(page.getByTestId('wizard-training-items')).toHaveValue('备份前写入的训练内容', {
       timeout: 20_000,
     });

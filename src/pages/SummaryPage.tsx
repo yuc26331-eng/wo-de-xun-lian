@@ -27,6 +27,7 @@ import { SummaryWizard } from '../components/summary/SummaryWizard';
 import { ExportDialog } from '../components/summary/ExportDialog';
 import { ImportChatGptReportButton } from '../components/ImportChatGptReportButton';
 import { ReportArchiveCard } from '../components/summary/ReportArchiveCard';
+import { DayAttachmentsCard } from '../components/summary/DayAttachmentsCard';
 import { useAppData } from '../state/AppData';
 import {
   KIND_EMOJI,
@@ -364,6 +365,7 @@ export default function SummaryPage() {
 
           {/* 默认走逐步引导；需要一次改很多项时可以切到完整表单 */}
           <ReportArchiveCard log={activeLog} date={activeDate} />
+          <DayAttachmentsCard log={activeLog} date={activeDate} />
 
           {advanced ? (
             <>

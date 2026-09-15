@@ -3,6 +3,7 @@ import { PDFDict, PDFDocument, PDFName } from 'pdf-lib';
 import { SESSION_KIND_LABEL, type ISODate } from '../../types';
 import { formatDateCN, formatDurationCN, formatNumber, parseISODate } from '../format';
 import { Report, type ReportFonts } from './buildReportPdf';
+import { sleepDurationText } from '../ocr/parse';
 import {
   CHATGPT_PREAMBLE,
   DISCLAIMER,
@@ -147,17 +148,24 @@ export function dayBlocks(day: DayBundle, include: ExportInclude): Block[] {
     // 场次明细（历史报告导入的多场训练）
     for (const s of log?.training?.sessions ?? []) {
       const bits = [
+        s.startTime ?? '',
         s.kind ? SESSION_KIND_LABEL[s.kind] : '',
         s.durationMin ? `${formatNumber(s.durationMin)} 分钟` : '',
         s.distanceKm ? `${formatNumber(s.distanceKm, 2)} km` : '',
         s.kcal ? `动态 ${formatNumber(s.kcal)} kcal` : '',
+        s.totalKcal ? `总消耗 ${formatNumber(s.totalKcal)} kcal` : '',
         s.avgHr ? `平均心率 ${formatNumber(s.avgHr)}` : '',
         s.maxHr ? `最高心率 ${formatNumber(s.maxHr)}` : '',
         s.paceText ? `配速 ${s.paceText}` : '',
         s.rpe != null ? `RPE ${s.rpe}` : '',
-        (s.note ?? '').trim(),
+        s.watchRecorded ? 'Apple Watch 已记录' : s.watchRecorded === false ? 'Apple Watch 未记录' : '',
+        (s.note ?? '').trim() ? `内容：${(s.note ?? '').trim()}` : '',
+        (s.feel ?? '').trim() ? `感受：${(s.feel ?? '').trim()}` : '',
       ].filter(Boolean);
       lines.push(`场次·${s.name}：${bits.join('，') || MISSING}`);
+    }
+    if ((log?.training?.sessions ?? []).length && log?.watch?.activeEnergyKcal != null) {
+      lines.push('说明：全天活动能量已包含训练消耗，本报告不把两者相加，避免重复计算');
     }
     blocks.push({ title: '训练情况', lines });
   }
@@ -187,13 +195,16 @@ export function dayBlocks(day: DayBundle, include: ExportInclude): Block[] {
 
   if (include.sleep) {
     const s = log?.sleep ?? {};
+    const sleepHours = s.totalHours ?? day.metric?.sleepHours ?? null;
     blocks.push({
       title: '睡眠情况',
       lines: [
         val('上床时间', s.bedTime ?? null),
         val('入睡时间', s.sleepTime ?? null),
         val('起床时间', s.wakeTime ?? null),
-        val('总睡眠时长', s.totalHours ?? day.metric?.sleepHours ?? null, ' 小时'),
+        sleepHours != null
+          ? `总睡眠时长：${sleepDurationText(sleepHours)}（= ${formatNumber(sleepHours)} 小时）`
+          : `总睡眠时长：${MISSING}`,
         val('深度睡眠', s.deepHours, ' 小时'),
         val('核心睡眠', s.coreHours, ' 小时'),
         val('REM 睡眠', s.remHours, ' 小时'),

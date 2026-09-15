@@ -395,18 +395,30 @@ export interface TrainingSection {
 
 /** 一天当中某一场训练的明细（场次级数据，来自训练记录或历史报告） */
 export interface TrainingSessionDetail {
+  id?: string;
   name: string;
   kind?: SessionKind;
+  /** 开始时间 HH:mm */
+  startTime?: string;
   durationMin?: number | null;
   distanceKm?: number | null;
   /** 动态消耗（千卡） */
   kcal?: number | null;
+  /** 总消耗（千卡） */
+  totalKcal?: number | null;
   avgHr?: number | null;
   maxHr?: number | null;
   rpe?: number | null;
   /** 配速描述，例如 '5分54秒/公里' */
   paceText?: string;
+  /** 训练内容 / 备注 */
   note?: string;
+  /** 这一次训练是否用 Apple Watch 记录 */
+  watchRecorded?: boolean;
+  /** 本次训练感受（疲劳、状态、比赛表现等） */
+  feel?: string;
+  /** 本次训练的手表数据（来自单次训练截图，只属于这一场训练） */
+  watch?: WatchData;
 }
 
 /** 报告里给出的评分项（例如 训练质量 8.1/10） */
@@ -447,6 +459,8 @@ export interface AttachmentMeta {
   id: string;
   date: ISODate;
   kind: AttachmentKind;
+  /** 归属的训练场次（kind='watch' 时：undefined/null = 全天活动，其它 = 某一次训练） */
+  sessionId?: string | null;
   name: string;
   type: string;
   size: number;
@@ -455,7 +469,14 @@ export interface AttachmentMeta {
   ocrText?: string;
   /** OCR 识别出的字段（保留下来便于重新展示与纠错） */
   ocrFields?: Record<string, number | string | null>;
-  ocrStatus?: 'pending' | 'done' | 'failed';
+  /** 识别出的截图类型 */
+  ocrKind?: 'sleep' | 'activity' | 'workout' | 'unknown';
+  /** 待用户确认的字段名 */
+  ocrPending?: string[];
+  /** done=有有效数据；partial=部分需确认；empty=没提取到；failed=识别报错 */
+  ocrStatus?: 'pending' | 'done' | 'partial' | 'empty' | 'failed';
+  /** 识别备注（提示语，展示在截图上） */
+  ocrNote?: string;
   ocrAt?: ISODateTime;
 }
 

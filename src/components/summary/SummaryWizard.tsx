@@ -33,6 +33,8 @@ import { useAppData } from '../../state/AppData';
 import { formatDateCN, formatDurationCN, formatNumber, nowISO, uid } from '../../lib/format';
 import { normalizeDailyLog } from '../../lib/summary/sections';
 import { ScreenshotStep } from './ScreenshotStep';
+import { TrainingSessionsCard } from './TrainingSessionsCard';
+import { sleepDurationText } from '../../lib/ocr/parse';
 
 const STEPS = [
   { key: 'training', title: '今天的训练', emoji: '🏋️', hint: '确认今天练了什么；休息日可以直接选「今天未训练」' },
@@ -131,12 +133,15 @@ export function SummaryWizard({ date, log, onOpenAdvanced, onFinalized }: Summar
       setSaving(true);
       try {
         const training = draft.training ?? {};
+        const sessions = training.sessions ?? [];
         const body = draft.body ?? {};
         const sleep = draft.sleep ?? {};
         const saved = await saveDailyLog({
           ...draft,
           date,
           id: date,
+          // 训练次数以训练卡片数量为准
+          training: sessions.length ? { ...training, sessionCount: sessions.length } : training,
           status: opts.final ? 'final' : 'draft',
           finalizedAt: opts.final ? nowISO() : draft.finalizedAt,
           lastStep: step.key,
@@ -333,9 +338,14 @@ export function SummaryWizard({ date, log, onOpenAdvanced, onFinalized }: Summar
 
         {step.key === 'training' && (
           <StepTraining
+            date={date}
             draft={draft}
             daySummaries={daySummaries}
             patchTraining={patchTraining}
+            onDirty={() => {
+              dirty.current = true;
+              setStatus('dirty');
+            }}
             onUseSummary={(s) =>
               patchTraining({
                 restDay: false,
@@ -484,18 +494,23 @@ export function SummaryWizard({ date, log, onOpenAdvanced, onFinalized }: Summar
 /* ------------------------------ 各步骤组件 ------------------------------ */
 
 function StepTraining({
+  date,
   draft,
   daySummaries,
   patchTraining,
   onUseSummary,
+  onDirty,
 }: {
+  date: ISODate;
   draft: DailyLog;
   daySummaries: WorkoutSummary[];
   patchTraining: (v: Partial<TrainingSection>) => void;
   onUseSummary: (s: WorkoutSummary) => void;
+  onDirty: () => void;
 }) {
   const training = draft.training ?? {};
   const rest = training.restDay === true;
+  const [more, setMore] = useState(false);
 
   return (
     <div>
@@ -533,6 +548,24 @@ function StepTraining({
         </div>
       ) : (
         <>
+          <TrainingSessionsCard
+            date={date}
+            training={training}
+            onChange={patchTraining}
+            onDirty={onDirty}
+          />
+          <button
+            className="link"
+            style={{ marginTop: 12 }}
+            data-testid="wizard-training-more"
+            onClick={() => setMore((v) => !v)}
+          >
+            {more
+              ? '收起全天补充'
+              : '全天补充（可选）：概述 / 完成度 / 跑步距离 / 配速 / 比赛表现 / 疼痛'}
+          </button>
+          {more && (
+          <div>
           <Field label="训练项目">
             <TextInput
               value={training.items ?? ''}
@@ -608,6 +641,8 @@ function StepTraining({
               </Field>
             </div>
           </div>
+          </div>
+          )}
         </>
       )}
 
@@ -1050,9 +1085,39 @@ function StepReviewPanel({
         {line('静息心率', watch.restingHr ? `${watch.restingHr} bpm` : null)}
         {line('HRV', watch.hrvMs ? `${watch.hrvMs} ms` : null)}
       </div>
+      {(draft.training?.sessions ?? []).length > 0 && (
+        <div className="summary-block" data-testid="review-sessions">
+          <h4>训练场次（{(draft.training?.sessions ?? []).length}）</h4>
+          {(draft.training?.sessions ?? []).map((s, i) => {
+            const bits = [
+              s.startTime ? `${s.startTime}` : '',
+              s.name || `第 ${i + 1} 次训练`,
+              s.durationMin ? `${formatNumber(s.durationMin)} 分钟` : '',
+              s.watchRecorded ? 'Apple Watch 已记录' : 'Apple Watch 未记录',
+              s.kcal ? `动态 ${formatNumber(s.kcal)} kcal` : '',
+              s.totalKcal ? `总消耗 ${formatNumber(s.totalKcal)} kcal` : '',
+              s.avgHr ? `平均心率 ${s.avgHr}` : '',
+              s.distanceKm ? `${formatNumber(s.distanceKm, 2)} km` : '',
+            ].filter(Boolean);
+            return (
+              <div key={s.id ?? i} className="tiny" style={{ lineHeight: 1.8 }}>
+                · {bits.join(' · ')}
+                {s.note ? <div className="muted">　内容：{s.note}</div> : null}
+                {s.feel ? <div className="muted">　感受：{s.feel}</div> : null}
+              </div>
+            );
+          })}
+          <div className="tiny muted" style={{ marginTop: 4 }}>
+            训练次数按卡片自动统计；全天活动能量已包含训练消耗，报告里不会重复相加。
+          </div>
+        </div>
+      )}
       <div className="summary-block">
         <h4>睡眠</h4>
-        {line('总睡眠', sleep.totalHours ? `${formatNumber(sleep.totalHours)} 小时` : null)}
+        {line(
+          '总睡眠',
+          sleep.totalHours ? `${sleepDurationText(sleep.totalHours)}（${formatNumber(sleep.totalHours)} 小时）` : null,
+        )}
         {line('入睡 / 起床', sleep.sleepTime || sleep.wakeTime ? `${sleep.sleepTime ?? '—'} / ${sleep.wakeTime ?? '—'}` : null)}
         {line('深度 / 核心 / REM', [sleep.deepHours, sleep.coreHours, sleep.remHours].some((v) => v != null)
           ? `${formatNumber(sleep.deepHours ?? 0)} / ${formatNumber(sleep.coreHours ?? 0)} / ${formatNumber(sleep.remHours ?? 0)} 小时`

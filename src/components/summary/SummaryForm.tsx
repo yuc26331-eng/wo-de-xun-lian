@@ -13,6 +13,7 @@ import { PAIN_SITES } from '../../lib/session';
 import { useAppData } from '../../state/AppData';
 import { dailyProgress, normalizeDailyLog, type SectionKey } from '../../lib/summary/sections';
 import { AttachmentsSection } from './AttachmentsSection';
+import { TrainingSessionsCard } from './TrainingSessionsCard';
 
 const KIND_OPTIONS = [
   { value: '', label: '未记录' },
@@ -157,6 +158,7 @@ export function SummaryForm({
     setStatus('saving');
     try {
       const training = draft.training ?? {};
+      const sessions = training.sessions ?? [];
       const body = draft.body ?? {};
       const sleep = draft.sleep ?? {};
       const meals = draft.meals ?? {};
@@ -165,6 +167,10 @@ export function SummaryForm({
         ...draft,
         date,
         id: date,
+        // 训练次数以卡片数量为准（不再用一个数字代表多条）
+        training: sessions.length
+          ? { ...training, sessionCount: sessions.length }
+          : training,
         // 兼容 v1 字段：其它页面（数据/首页/导出）继续可用
         weightKg: body.weightKg ?? null,
         fatigue: body.fatigue ?? null,
@@ -451,6 +457,16 @@ export function SummaryForm({
         open={open === 'watch'}
         onToggle={() => setOpen(open === 'watch' ? null : 'watch')}
       >
+        <TrainingSessionsCard
+          date={date}
+          training={draft.training}
+          onChange={(patch) => setSection('training', patch)}
+          onDirty={() => {
+            dirty.current = true;
+            setStatus('dirty');
+          }}
+        />
+        <div className="divider" />
         <Row>
           <div className="grow">
             <Field label="活动能量（kcal）">
