@@ -58,10 +58,42 @@ test.describe('PWA / 离线能力', () => {
 
   test('刷新与重新打开后本地数据仍在（IndexedDB）', async ({ page }) => {
     await page.goto('/');
-    const before = await page.getByText('本周训练').isVisible();
-    expect(before).toBe(true);
+    await expect(page.getByText('本周训练', { exact: true })).toBeVisible();
+    // 记录首页展示的今日计划标题
+    const planTitle = await page
+      .locator('[data-testid="today-plan-title"]')
+      .first()
+      .textContent();
+    expect(planTitle?.trim().length).toBeGreaterThan(0);
+
     await page.reload();
-    await expect(page.getByText('最近训练')).toBeVisible();
-    await expect(page.getByText('今日计划')).toBeVisible();
+    await expect(page.getByText('最近训练', { exact: true })).toBeVisible();
+    await expect(page.getByText('今日计划', { exact: true })).toBeVisible();
+    await expect(page.locator('[data-testid="today-plan-title"]').first()).toHaveText(
+      planTitle!.trim(),
+    );
+
+    // 数据确实持久化在 IndexedDB 中（不是内存态）
+    const counts = await page.evaluate(async () => {
+      const db = await new Promise<IDBDatabase>((resolve, reject) => {
+        const req = indexedDB.open('wo-de-xun-lian');
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error);
+      });
+      const count = (store: string) =>
+        new Promise<number>((resolve, reject) => {
+          const tx = db.transaction(store, 'readonly');
+          const req = tx.objectStore(store).count();
+          req.onsuccess = () => resolve(req.result);
+          req.onerror = () => reject(req.error);
+        });
+      return {
+        plans: await count('plans'),
+        exercises: await count('exercises'),
+        metrics: await count('bodyMetrics'),
+      };
+    });
+    expect(counts.plans).toBeGreaterThan(0);
+    expect(counts.exercises).toBeGreaterThan(0);
   });
 });

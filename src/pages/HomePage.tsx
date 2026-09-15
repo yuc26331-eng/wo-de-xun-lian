@@ -246,7 +246,11 @@ export default function HomePage() {
         <Card>
           <div className="row-between" style={{ alignItems: 'flex-start' }}>
             <div style={{ minWidth: 0 }}>
-              <div className="exercise-name" style={{ fontSize: 19 }}>
+              <div
+                className="exercise-name"
+                style={{ fontSize: 19 }}
+                data-testid="today-plan-title"
+              >
                 {KIND_EMOJI[plan.kind]} {plan.title}
               </div>
               <div className="tiny muted" style={{ marginTop: 4 }}>
@@ -293,7 +297,13 @@ export default function HomePage() {
             desc="从 ChatGPT 导出的 PDF 可以直接导入，识别后确认再保存"
             action={
               <div className="col" style={{ gap: 10, width: '100%' }}>
-                <PdfImportButton variant="primary" size="lg" block label="导入 ChatGPT PDF" testId="import-pdf" />
+                <PdfImportButton
+                  variant="primary"
+                  size="lg"
+                  block
+                  label="导入 ChatGPT PDF"
+                  testId="import-pdf-empty"
+                />
                 <Button block size="lg" onClick={() => navigate('/train')}>
                   新建训练计划
                 </Button>
@@ -389,7 +399,7 @@ export default function HomePage() {
 
       {/* 导入 PDF */}
       <SectionTitle>导入 ChatGPT PDF</SectionTitle>
-      <PdfDropZone label="把 ChatGPT 生成的训练 PDF 拖到这里，或点击选择文件" />
+      <PdfDropZone label="把 ChatGPT 生成的训练 PDF 拖到这里，或点击选择文件" testId="import-pdf" />
 
       {/* 最近训练 */}
       <SectionTitle action="全部记录" onAction={() => navigate('/history')}>

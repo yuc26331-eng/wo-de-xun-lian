@@ -6,7 +6,7 @@
  */
 import { useRef, useState, type DragEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { importPdfFile, isAlreadySaved, PdfReadError } from '../lib/pdf';
+import type { PdfReadError } from '../lib/pdf/importFile';
 import { useAppData } from '../state/AppData';
 import { Button, Sheet, useToast } from './ui';
 import { IconImport } from './icons';
@@ -14,9 +14,14 @@ import { IconImport } from './icons';
 type Variant = 'primary' | 'default' | 'ghost';
 type Size = 'sm' | 'md' | 'lg' | 'xl';
 
+/** PDF 解析库（pdf.js）体积较大，只在用户真的要导入时按需加载 */
+async function loadPdfLib() {
+  return import('../lib/pdf/importFile');
+}
+
 function messageFor(err: unknown): string {
-  if (err instanceof PdfReadError) {
-    switch (err.code) {
+  if (err instanceof Error && 'code' in err) {
+    switch ((err as PdfReadError).code) {
       case 'not-pdf':
         return '请选择 PDF 文件。';
       case 'too-large':
@@ -51,6 +56,7 @@ function usePdfImporter() {
     setProgress(0);
     setError(null);
     try {
+      const { importPdfFile, isAlreadySaved } = await loadPdfLib();
       if (isAlreadySaved(pdfImports, file.name, file.size)) {
         const previous = pdfImports.find((r) => r.saved && r.fileName === file.name);
         setDuplicate({ id: previous?.id ?? '', name: file.name });
@@ -98,13 +104,14 @@ export function PdfImportButton({
   const importer = usePdfImporter();
 
   return (
-    <>
+    /* 容器上带 testId，e2e 用 `[data-testid="import-pdf"] input[type=file]` 直接塞文件 */
+    <div data-testid={testId} className="import-button-wrap">
       <Button
         variant={variant}
         size={size}
         block={block}
         className={className}
-        data-testid={testId}
+        data-testid={testId ? `${testId}-button` : undefined}
         disabled={importer.busy}
         onClick={() => inputRef.current?.click()}
       >
@@ -125,7 +132,7 @@ export function PdfImportButton({
         }}
       />
       <ImportFeedback importer={importer} />
-    </>
+    </div>
   );
 }
 
@@ -134,11 +141,13 @@ export function PdfDropZone({
   className,
   compact,
   onDone,
+  testId,
 }: {
   label?: string;
   className?: string;
   compact?: boolean;
   onDone?: (importId: string) => void;
+  testId?: string;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [over, setOver] = useState(false);
@@ -153,7 +162,8 @@ export function PdfDropZone({
   }
 
   return (
-    <>
+    /* 容器上带 testId，便于 e2e 直接向 input 塞文件 */
+    <div data-testid={testId} className="import-button-wrap">
       <div
         className={`drop-zone ${over ? 'over' : ''} ${compact ? 'compact' : ''} ${className ?? ''}`}
         role="button"
@@ -189,7 +199,7 @@ export function PdfDropZone({
         }}
       />
       <ImportFeedback importer={importer} onDone={onDone} />
-    </>
+    </div>
   );
 }
 

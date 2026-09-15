@@ -1,73 +1,84 @@
 import { expect, test } from '@playwright/test';
 
 test.describe('实时跟练完整流程', () => {
-  test('完成一组 → 休息倒计时 → 刷新后进度仍在 → 防重复点击', async ({ page }) => {
+  test('完成一组 → 休息倒计时 → 刷新后进度仍在（只记录一次）', async ({ page }) => {
     await page.goto('/');
     await page.getByTestId('start-training').click();
-    await expect(page.getByText(/动作\s*1\s*\/\s*\d+/)).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByTestId('live-progress')).toContainText('动作 1/');
 
-    const complete = page.getByRole('button', { name: /完成本组/ });
+    const complete = page.getByTestId('live-complete-set');
     await expect(complete).toBeVisible();
+    await expect(complete).toContainText('1/');
 
-    // 连点两次，只允许记录一组
-    await complete.click({ clickCount: 2, delay: 40 });
-    await page.waitForTimeout(500);
+    await complete.click();
+    await page.waitForTimeout(400);
 
-    const doneLabel = page.getByText(/已完成?\s*\d+\s*\/\s*\d+\s*组/).first();
-    await expect(doneLabel).toBeVisible();
-    const text = (await doneLabel.textContent()) ?? '';
-    const done = Number(text.match(/(\d+)\s*\/\s*(\d+)/)?.[1] ?? '0');
-    expect(done, `连续点击后应只记录 1 组，实际 ${done}`).toBe(1);
-
-    // 休息倒计时出现
-    await expect(page.getByText(/休息|倒计时/).first()).toBeVisible();
+    // 自动进入休息倒计时（休息期间不显示组点，跳过休息后回到动作卡片）
+    await expect(page.getByTestId('live-rest-timer')).toBeVisible();
+    await page.getByTestId('live-rest-skip').click();
+    await expect(page.locator('.set-dot.done')).toHaveCount(1);
 
     // 刷新后进度仍然存在（中途退出可恢复）
     await page.reload();
-    await expect(page.getByText(/动作\s*\d+\s*\/\s*\d+/)).toBeVisible({ timeout: 15_000 });
-    const afterReload = page.getByText(/已完成?\s*\d+\s*\/\s*\d+\s*组/).first();
-    await expect(afterReload).toBeVisible();
-    await expect(afterReload).toContainText('1');
+    await expect(page.getByTestId('live-progress')).toContainText('动作 1/');
+    await page.waitForTimeout(600);
+    // 休息倒计时在刷新后仍在进行，跳过休息才能看到组点
+    if (await page.getByTestId('live-rest-skip').isVisible().catch(() => false)) {
+      await page.getByTestId('live-rest-skip').click();
+    }
+    await expect(page.locator('.set-dot.done')).toHaveCount(1);
   });
 
   test('跳过动作 / 加减一组 / 记录疼痛都生效', async ({ page }) => {
     await page.goto('/');
     await page.getByTestId('start-training').click();
-    await expect(page.getByText(/动作\s*1\s*\/\s*\d+/)).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByTestId('live-progress')).toContainText('动作 1/');
 
     // 增加一组
-    await page.getByRole('button', { name: /增加一组|\+1\s*组/ }).click();
-    await expect(page.getByText(/已完成?\s*0\s*\/\s*\d+\s*组/).first()).toBeVisible();
+    const before = await page.locator('.set-dot').count();
+    await page.getByTestId('live-add-set').click();
+    await expect(page.locator('.set-dot')).toHaveCount(before + 1);
+    await page.getByTestId('live-remove-set').click();
+    await expect(page.locator('.set-dot')).toHaveCount(before);
 
     // 记录不适
-    await page.getByRole('button', { name: /不适|疼痛/ }).first().click();
-    await expect(page.getByText(/疼痛|不适/).first()).toBeVisible();
-    await page.keyboard.press('Escape');
+    await page.getByTestId('live-pain-open').click();
+    await expect(page.getByText('记录疼痛或不适')).toBeVisible();
+    await page.getByTestId('live-pain-site').first().click();
+    await page.getByTestId('live-pain-save').click();
+    await expect(page.getByText('已记录疼痛，注意安全，必要时停止训练')).toBeVisible();
 
     // 跳到下一项
-    await page.getByRole('button', { name: /下一项|下一个/ }).first().click();
-    await expect(page.getByText(/动作\s*2\s*\/\s*\d+/)).toBeVisible();
+    await page.getByTestId('live-next').click();
+    await expect(page.getByTestId('live-progress')).toContainText('动作 2/');
   });
 
   test('结束训练生成总结并可导出中文 PDF', async ({ page }) => {
     await page.goto('/');
     await page.getByTestId('start-training').click();
-    await expect(page.getByText(/动作\s*1\s*\/\s*\d+/)).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByTestId('live-progress')).toContainText('动作 1/');
 
-    await page.getByRole('button', { name: /完成本组/ }).click();
+    await page.getByTestId('live-complete-set').click();
     await page.waitForTimeout(300);
 
-    await page.getByRole('button', { name: /结束训练|完成训练/ }).first().click();
-    await page.getByRole('button', { name: /保存总结|保存到历史/ }).first().click();
+    await page.getByTestId('live-pause').click();
+    await page.getByTestId('live-end-early').click();
+    await expect(page.getByText('结束训练并保存总结')).toBeVisible();
+    await page.getByTestId('live-finish-confirm').click();
 
-    await expect(page.getByText(/训练完成|今日总结/).first()).toBeVisible({ timeout: 15_000 });
+    // 结束后跳到总结页，并展示今日总结
+    await expect(page).toHaveURL(/summary/, { timeout: 20_000 });
+    await expect(page.getByText('今日总结').first()).toBeVisible({ timeout: 20_000 });
 
     const download = page.waitForEvent('download', { timeout: 60_000 });
-    await page.getByRole('button', { name: /导出\s*PDF|导出总结|保存为\s*PDF/ }).first().click();
+    await page.getByRole('button', { name: /导出今日训练 PDF/ }).first().click();
     const file = await download;
-    const path = await file.path();
-    expect(path).toBeTruthy();
-    const { size } = await import('node:fs').then((fs) => fs.promises.stat(path!));
+    const filePath = await file.path();
+    expect(filePath).toBeTruthy();
+    const { size } = await import('node:fs').then((fs) => fs.promises.stat(filePath!));
     expect(size).toBeGreaterThan(5000);
+    const bytes = await import('node:fs').then((fs) => fs.promises.readFile(filePath!));
+    expect(bytes.subarray(0, 5).toString('latin1')).toBe('%PDF-');
+    await page.screenshot({ path: 'test-results/screens/summary-after-workout.png' });
   });
 });

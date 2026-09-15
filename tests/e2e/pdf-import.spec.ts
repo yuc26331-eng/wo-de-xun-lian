@@ -12,9 +12,11 @@ test.describe('PDF 智能导入', () => {
     await expect(page.getByRole('heading', { name: /导入确认/ })).toBeVisible({ timeout: 30_000 });
     await expect(page.getByText(/健身计划|下肢力量/).first()).toBeVisible();
 
-    // 识别结果里应包含动作与组数信息
-    await expect(page.getByText(/杠铃深蹲/).first()).toBeVisible();
-    await expect(page.getByText(/5\s*次|5次/).first()).toBeVisible();
+    // 识别结果里应包含动作与组数信息（动作名称是可编辑输入框）
+    await expect(page.getByTestId('exercise-card')).toHaveCount(4);
+    await expect(page.getByTestId('ex-name-0')).toHaveValue(/杠铃深蹲/);
+    await expect(page.getByTestId('ex-reps-0')).toHaveValue(/5/);
+    await expect(page.getByTestId('ex-sets-0')).toHaveValue('4');
 
     // 用户可修改：把计划名称改成自定义内容
     const titleInput = page.getByTestId('import-title');

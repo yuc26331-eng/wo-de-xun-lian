@@ -131,6 +131,15 @@ export function parseTargetFromText(text: string): TargetSpec {
       target.durationSec = /分|min/.test(unit) ? Math.round(n * 60) : Math.round(n);
     }
   }
+  // 「3 组 60 秒」「3组×40秒」这类等长训练：没有次数但有秒数
+  if (target.durationSec == null && target.reps == null && target.sets != null) {
+    const isometric = t.match(/(\d{1,3})\s*(秒|分钟|min|s\b)/i);
+    if (isometric) {
+      const unit = isometric[2];
+      const n = Number(isometric[1]);
+      target.durationSec = /分|min/.test(unit) ? Math.round(n * 60) : Math.round(n);
+    }
+  }
 
   // 距离 / 配速 / 速度 / 心率 / 上场时间
   const km = t.match(/(\d{1,3}(?:\.\d+)?)\s*(?:公里|千米|km)/i);
@@ -461,6 +470,15 @@ export function parsePlanBody(text: string, opts: ParsePlanOptions): PlanBody {
       sections.meta.push(line);
       continue;
     }
+    // 单行热身：「热身：慢跑 5 分钟；动态拉伸 5 分钟」
+    const warmHit = current === 'meta' ? matchLabel(line, ['热身内容', '热身安排', '热身', '准备活动'], 'rest') : null;
+    if (warmHit) {
+      for (const part of warmHit.value.split(/[;；]/)) {
+        const t = part.trim();
+        if (t) sections.warmup.push(t);
+      }
+      continue;
+    }
     // 「备注：…」这类行归到计划备注，而不是当成动作要领
     const planNoteLabels = current === 'main' ? ['备注', '教练备注'] : ['备注', '注意事项', '说明', '提示', '教练备注'];
     const noteHit = current !== 'notes' ? matchLabel(line, planNoteLabels, 'rest') : null;
@@ -498,9 +516,20 @@ export function parsePlanBody(text: string, opts: ParsePlanOptions): PlanBody {
     const ex = exerciseFromBlock(b, exercises.length, sessionKind);
     if (ex) exercises.push(ex);
   }
+  // 没有目标数值、且名字像放松内容的块，归到拉伸恢复而不是动作
+  const cooldownExtra: string[] = [];
+  const keptExercises = exercises.filter((e) => {
+    const noTarget =
+      !e.target.sets && !e.target.reps && e.target.weightKg == null && !e.target.durationSec && !e.target.distanceKm;
+    if (noTarget && /拉伸|放松|泡沫轴|冷身|整理活动|恢复/.test(e.name)) {
+      cooldownExtra.push(e.cue ? `${e.name}：${e.cue}` : e.name);
+      return false;
+    }
+    return true;
+  });
 
   // 4. 拉伸 / 恢复 / 备注
-  const cooldown = sections.cooldown.join('\n').trim();
+  const cooldown = [...sections.cooldown, ...cooldownExtra].join('\n').trim();
   const notes = sections.notes.join('\n').trim();
 
   // 5. 置信度与提示
@@ -509,15 +538,15 @@ export function parsePlanBody(text: string, opts: ParsePlanOptions): PlanBody {
   if (title && title !== '导入的训练计划') score += 1;
   if (dateHit) score += 1;
   if (warmup.length) score += 0.5;
-  if (exercises.length) score += 1.5;
-  if (exercises.some((e) => e.target.sets && e.target.reps)) score += 1;
+  if (keptExercises.length) score += 1.5;
+  if (keptExercises.some((e) => e.target.sets && e.target.reps)) score += 1;
   const confidence = Math.max(0.1, Math.min(1, score / total));
 
-  if (!exercises.length) warnings.push('没有识别到训练动作，请手动添加，或确认 PDF 是否为文字型文件。');
+  if (!keptExercises.length) warnings.push('没有识别到训练动作，请手动添加，或确认 PDF 是否为文字型文件。');
   if (!dateHit) warnings.push('未识别到训练日期，已默认使用今天，可手动修改。');
-  const noTargets = exercises.filter((e) => !e.target.sets && !e.target.reps && !e.target.durationSec);
+  const noTargets = keptExercises.filter((e) => !e.target.sets && !e.target.reps && !e.target.durationSec);
   if (noTargets.length) warnings.push(`有 ${noTargets.length} 个动作未识别到组数/次数，请手动补全。`);
-  if (exercises.length > 0 && exercises.length < 2) warnings.push('只识别到 1 个动作，请检查 PDF 排版是否为多列。');
+  if (keptExercises.length > 0 && keptExercises.length < 2) warnings.push('只识别到 1 个动作，请检查 PDF 排版是否为多列。');
 
   return {
     title,
@@ -525,7 +554,7 @@ export function parsePlanBody(text: string, opts: ParsePlanOptions): PlanBody {
     sessionKind,
     estimatedMinutes,
     warmup,
-    exercises,
+    exercises: keptExercises,
     cooldown,
     notes,
     confidence,

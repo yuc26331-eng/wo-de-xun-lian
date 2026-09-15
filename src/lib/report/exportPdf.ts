@@ -1,11 +1,11 @@
 /** 浏览器端导出：按需加载中文字体与生成库，下载 PDF 文件 */
 import type { BodyMetric, DailyLog, LiveSession, TrainingPlan, WorkoutSummary } from '../../types';
-import {
-  buildPlanPdf,
-  buildSummaryPdf,
-  type ReportFonts,
-  type SummaryReportInput,
-} from './buildReportPdf';
+import type { ReportFonts, SummaryReportInput } from './buildReportPdf';
+
+/** pdf-lib 只在真正导出时才加载，避免拖慢首屏 */
+async function loadReportLib() {
+  return import('./buildReportPdf');
+}
 
 let fontCache: ReportFonts | null = null;
 
@@ -39,12 +39,14 @@ function download(bytes: Uint8Array, fileName: string) {
 }
 
 export async function exportSummaryPdf(input: SummaryReportInput): Promise<void> {
+  const { buildSummaryPdf } = await loadReportLib();
   const fonts = await loadFonts();
   const bytes = await buildSummaryPdf(input, fonts);
   download(bytes, `训练报告-${input.summary.date}-${input.summary.planTitle}.pdf`);
 }
 
 export async function exportPlanPdf(plan: TrainingPlan): Promise<void> {
+  const { buildPlanPdf } = await loadReportLib();
   const fonts = await loadFonts();
   const bytes = await buildPlanPdf(plan, fonts);
   download(bytes, `训练计划-${plan.date ?? '未定日期'}-${plan.title}.pdf`);

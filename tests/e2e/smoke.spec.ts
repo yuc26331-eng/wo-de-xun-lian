@@ -44,7 +44,7 @@ test.describe('五个主页面基本可用', () => {
 
   test('刷新后训练数据不丢失（IndexedDB 持久化）', async ({ page }) => {
     await page.goto('/');
-    await expect(page.getByText('本周训练')).toBeVisible();
+    await expect(page.getByText('本周训练', { exact: true })).toBeVisible();
     await page.evaluate(async () => {
       await new Promise<void>((resolve) => {
         const req = indexedDB.open('wo-de-xun-lian');

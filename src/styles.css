@@ -862,7 +862,8 @@ a {
   position: fixed;
   left: 0;
   right: 0;
-  bottom: calc(var(--nav-h) + var(--safe-bottom) + 14px);
+  /* 抬高一些，避免遮住底部导航上的主要内容以及跟练页的大号按钮 */
+  bottom: calc(var(--nav-h) + var(--safe-bottom) + 86px);
   z-index: 80;
   display: flex;
   flex-direction: column;
@@ -911,7 +912,6 @@ a {
   flex-direction: column;
   background: var(--bg);
   padding-top: var(--safe-top);
-  padding-bottom: var(--safe-bottom);
   padding-left: var(--safe-left);
   padding-right: var(--safe-right);
 }
@@ -1313,4 +1313,114 @@ table.data-table th.num {
   gap: 8px;
   min-height: 48px;
   padding: 12px;
+}
+
+.chart-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 96px;
+  border-radius: var(--radius-sm);
+  background: var(--card-2);
+}
+
+.chart-summary {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-top: 6px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.chart-summary strong {
+  font-size: 17px;
+  color: var(--text);
+}
+
+.cal {
+  margin-top: 6px;
+}
+
+.cal-head,
+.cal-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 4px;
+}
+
+.cal-head {
+  margin-bottom: 6px;
+  text-align: center;
+}
+
+.cal-cell {
+  position: relative;
+  aspect-ratio: 1 / 1;
+  min-height: 40px;
+  border: none;
+  border-radius: 11px;
+  background: var(--card-2);
+  color: var(--text-2);
+  font: inherit;
+  font-size: 13.5px;
+  font-weight: 550;
+  cursor: pointer;
+}
+
+.cal-cell.trained {
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.cal-cell.trained::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  bottom: 5px;
+  width: 4px;
+  height: 4px;
+  margin-left: -2px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+.cal-cell.selected {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.metric-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 48px;
+}
+
+.metric-row + .metric-row {
+  border-top: 1px solid var(--sep);
+}
+
+.metric-row .label {
+  font-size: 14.5px;
+  color: var(--text-2);
+}
+
+.metric-row .value {
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+
+.pr-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 12px 0;
+}
+
+.pr-row + .pr-row {
+  border-top: 1px solid var(--sep);
 }

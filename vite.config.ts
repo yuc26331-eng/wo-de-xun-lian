@@ -54,6 +54,16 @@ export default defineConfig({
               cacheableResponse: { statuses: [0, 200] },
             },
           },
+          {
+            // 导出 PDF 时通过 fetch() 读取中文字体，离线也要可用
+            urlPattern: /\/fonts\/.*\.ttf$/,
+            handler: 'CacheFirst',
+            options: {
+              cacheName: 'cjk-fonts',
+              expiration: { maxEntries: 6, maxAgeSeconds: 60 * 60 * 24 * 365 },
+              cacheableResponse: { statuses: [0, 200] },
+            },
+          },
         ],
       },
       devOptions: { enabled: false },

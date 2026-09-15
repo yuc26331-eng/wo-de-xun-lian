@@ -3,6 +3,7 @@
  * 今日总结 / 训练报告 / PDF 导入 / 导出中文 PDF
  */
 import { useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { Page } from '../components/Page';
 import { PdfDropZone, PdfImportButton } from '../components/PdfImportButton';
 import {
@@ -150,17 +151,28 @@ export default function SummaryPage() {
   } = useAppData();
 
   const today = toISODate();
+  const [searchParams] = useSearchParams();
+  const requestedDate = searchParams.get('date');
+  // 跟练结束后会跳到 /summary?date=YYYY-MM-DD，这里允许查看指定日期
+  const activeDate =
+    requestedDate && /^\d{4}-\d{2}-\d{2}$/.test(requestedDate) ? requestedDate : today;
   const [tab, setTab] = useState<Tab>('today');
   const [detail, setDetail] = useState<WorkoutSummary | null>(null);
   const [exporting, setExporting] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<WorkoutSummary | null>(null);
 
   const todaySummary = useMemo(
-    () => summaries.filter((s) => s.date === today).sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1))[0] ?? null,
-    [summaries, today],
+    () =>
+      summaries
+        .filter((s) => s.date === activeDate)
+        .sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1))[0] ?? null,
+    [summaries, activeDate],
   );
-  const log = useMemo(() => dailyLogs.find((d) => d.date === today) ?? null, [dailyLogs, today]);
-  const todayMetric = useMemo(() => bodyMetrics.find((m) => m.date === today) ?? null, [bodyMetrics, today]);
+  const log = useMemo(() => dailyLogs.find((d) => d.date === activeDate) ?? null, [dailyLogs, activeDate]);
+  const todayMetric = useMemo(
+    () => bodyMetrics.find((m) => m.date === activeDate) ?? null,
+    [bodyMetrics, activeDate],
+  );
 
   const [weight, setWeight] = useState<number | null>(null);
   const [rpe, setRpe] = useState(6);
@@ -194,7 +206,7 @@ export default function SummaryPage() {
     setSaving(true);
     try {
       await saveDailyLog({
-        date: today,
+        date: activeDate,
         weightKg: weight,
         rpe,
         fatigue,
@@ -205,7 +217,7 @@ export default function SummaryPage() {
         trainingVolumeKg: todaySummary?.totalVolumeKg ?? null,
         summaryId: todaySummary?.id,
       });
-      if (weight != null) await saveBodyMetric({ date: today, weightKg: weight });
+      if (weight != null) await saveBodyMetric({ date: activeDate, weightKg: weight });
       if (todaySummary) {
         await saveSummary({
           ...todaySummary,
@@ -249,7 +261,7 @@ export default function SummaryPage() {
   }
 
   return (
-    <Page title="总结" sub={formatDateCN(today)}>
+    <Page title="总结" sub={formatDateCN(activeDate)}>
       <Segmented<Tab>
         value={tab}
         onChange={setTab}

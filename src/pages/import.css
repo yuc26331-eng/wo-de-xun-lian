@@ -1,0 +1,178 @@
+/* PDF 导入相关样式（导入按钮 / 拖拽区 / 确认页） */
+
+.hidden-file {
+  display: none;
+}
+
+.import-button-wrap {
+  display: block;
+  width: 100%;
+}
+
+.drop-zone.compact {
+  padding: 14px 12px;
+}
+
+.import-progress {
+  height: 6px;
+  border-radius: 999px;
+  background: var(--card-2);
+  overflow: hidden;
+  margin-top: 10px;
+}
+
+.import-progress > i {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  transition: width 0.2s ease;
+}
+
+.import-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+
+.exercise-card {
+  background: var(--card);
+  border-radius: var(--radius-sm);
+  padding: 12px;
+  margin-bottom: 10px;
+  box-shadow: var(--shadow-sm);
+}
+
+.exercise-card .ex-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.exercise-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.exercise-grid .field-label {
+  font-size: 11.5px;
+}
+
+.exercise-grid .input {
+  min-height: 40px;
+  padding: 8px 10px;
+}
+
+.ex-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: auto;
+}
+
+.ex-actions button {
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted);
+}
+
+.ex-actions button:active {
+  background: var(--card-2);
+}
+
+.diff-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.diff-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 14px;
+  min-width: 0;
+}
+
+.diff-row .k {
+  color: var(--muted);
+  flex: 0 0 74px;
+}
+
+.diff-row .v {
+  flex: 1 1 auto;
+  min-width: 0;
+  word-break: break-word;
+}
+
+.diff-row .old {
+  color: var(--muted);
+  text-decoration: line-through;
+  margin-right: 6px;
+  word-break: break-word;
+}
+
+.diff-row.new .v {
+  color: var(--green);
+}
+
+.warn-box {
+  background: color-mix(in srgb, var(--orange) 12%, transparent);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  margin-bottom: 10px;
+}
+
+.warn-box ul {
+  margin: 4px 0 0;
+  padding-left: 18px;
+}
+
+.warn-box li {
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.confidence {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.confidence .bar {
+  flex: 1 1 auto;
+}
+
+.day-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--sep);
+}
+
+.day-row:last-child {
+  border-bottom: 0;
+}
+
+.sticky-actions {
+  position: sticky;
+  bottom: calc(var(--safe-bottom) + 8px);
+  z-index: 12;
+  padding-top: 8px;
+  background: linear-gradient(to top, var(--bg) 62%, transparent);
+}
+
+@media print {
+  .sticky-actions {
+    display: none;
+  }
+}
