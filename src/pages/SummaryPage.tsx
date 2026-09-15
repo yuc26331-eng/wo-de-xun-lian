@@ -294,6 +294,9 @@ export default function SummaryPage() {
                 <IconShare width={18} height={18} style={{ marginRight: 6 }} />
                 {exporting === todaySummary.id ? '正在生成 PDF…' : '导出今日训练 PDF'}
               </Button>
+              <div className="tiny muted center" style={{ marginTop: 8 }}>
+                PDF 内嵌中文字体（约 2-3MB），中文不会乱码、内容不会被截断
+              </div>
             </Card>
           ) : (
             <Card>

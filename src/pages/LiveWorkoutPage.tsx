@@ -895,7 +895,11 @@ export default function LiveWorkoutPage() {
                 完成本组 {doneSets + 1}/{exercise.sets.length}
               </Button>
             )}
-            <div className="tiny muted center" style={{ marginTop: 8 }}>
+            <div
+              className="tiny muted center"
+              style={{ marginTop: 8 }}
+              data-testid="live-progress-done"
+            >
               已完成 {progress.doneSets}/{progress.plannedSets} 组 · 剩余 {pendingCount} 个动作 ·
               自动保存中
             </div>
