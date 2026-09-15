@@ -26,5 +26,27 @@ await page.goto(`${url}/#/data`, { waitUntil: 'networkidle' });
 await page.waitForTimeout(900);
 await page.screenshot({ path: `${out}/data.png` });
 
+// v1.1：今日总结（六大分区）
+await page.goto(`${url}/#/summary`, { waitUntil: 'networkidle' });
+await page.getByTestId('summary-status').waitFor({ timeout: 20000 });
+await page.waitForTimeout(700);
+await page.screenshot({ path: `${out}/summary.png` });
+
+// v1.1：一键导出给 ChatGPT（含预览）
+await page.getByTestId('open-export').click();
+await page.getByText('查看 Markdown 预览').click();
+await page.waitForTimeout(700);
+await page.screenshot({ path: `${out}/export.png` });
+await page.keyboard.press('Escape');
+
+// v1.1：ChatGPT 报告页 + 版本与更新
+await page.goto(`${url}/#/summary?tab=chatgpt`, { waitUntil: 'networkidle' });
+await page.waitForTimeout(700);
+await page.screenshot({ path: `${out}/chatgpt-reports.png` });
+await page.goto(`${url}/#/me`, { waitUntil: 'networkidle' });
+await page.getByTestId('update-check').scrollIntoViewIfNeeded();
+await page.waitForTimeout(600);
+await page.screenshot({ path: `${out}/update-panel.png` });
+
 await browser.close();
 console.log('screenshots ->', out);

@@ -265,28 +265,26 @@ export default function SummaryPage() {
       {tab === 'today' && (
         <div style={{ marginTop: 14 }}>
           <Card flat>
-            <div className="row-between">
-              <div className="grow">
-                <div className="small muted">记录日期</div>
-                <div className="strong" style={{ fontSize: 17 }}>
-                  {formatDateCN(activeDate)}
-                </div>
+            <div>
+              <div className="small muted">记录日期</div>
+              <div className="strong" style={{ fontSize: 17 }}>
+                {formatDateCN(activeDate)}
               </div>
-              <div className="row wrap" style={{ gap: 6 }}>
-                <Button size="sm" onClick={() => setActiveDate(addDays(activeDate, -1))}>
-                  ‹ 前一天
-                </Button>
-                <Button size="sm" disabled={activeDate === today} onClick={() => setActiveDate(today)}>
-                  今天
-                </Button>
-                <Button
-                  size="sm"
-                  disabled={activeDate >= today}
-                  onClick={() => setActiveDate(addDays(activeDate, 1))}
-                >
-                  后一天 ›
-                </Button>
-              </div>
+            </div>
+            <div className="row wrap" style={{ gap: 6, marginTop: 10 }}>
+              <Button size="sm" onClick={() => setActiveDate(addDays(activeDate, -1))}>
+                ‹ 前一天
+              </Button>
+              <Button size="sm" disabled={activeDate === today} onClick={() => setActiveDate(today)}>
+                今天
+              </Button>
+              <Button
+                size="sm"
+                disabled={activeDate >= today}
+                onClick={() => setActiveDate(addDays(activeDate, 1))}
+              >
+                后一天 ›
+              </Button>
             </div>
             <div className="tiny muted" style={{ marginTop: 6 }}>
               {activeProgress.hasAny

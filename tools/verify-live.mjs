@@ -179,13 +179,15 @@ await page.getByTestId('update-check').scrollIntoViewIfNeeded();
 const currentVersion = (await page.getByTestId('update-current').textContent()) ?? '';
 check('应用内更新面板显示当前版本', /v\d+\.\d+\.\d+/.test(currentVersion), currentVersion.trim());
 await page.getByTestId('update-check').click();
-const updateStatus = await page
-  .getByTestId('update-status')
-  .textContent({ timeout: 25000 })
-  .catch(() => '');
+let updateStatus = '';
+for (let i = 0; i < 40; i += 1) {
+  updateStatus = (await page.getByTestId('update-status').textContent().catch(() => '')) ?? '';
+  if (/已是最新版本|发现新版本|更新失败|当前离线/.test(updateStatus)) break;
+  await page.waitForTimeout(500);
+}
 check(
   '检查更新返回明确状态',
-  /已是最新版本|发现新版本|正在检查/.test(updateStatus ?? ''),
+  /已是最新版本|发现新版本|更新失败|当前离线/.test(updateStatus ?? ''),
   updateStatus?.trim() ?? '无状态',
 );
 await page.screenshot({ path: `${out}/live-update-panel.png`, fullPage: true });
