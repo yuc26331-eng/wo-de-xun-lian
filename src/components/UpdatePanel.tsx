@@ -39,7 +39,9 @@ export function UpdatePanel() {
         <div className="strong" style={{ fontSize: 16 }}>
           版本与更新
         </div>
-        <Chip tone={label.tone === 'default' ? 'default' : label.tone}>{label.text}</Chip>
+        <span data-testid="update-status">
+          <Chip tone={label.tone === 'default' ? 'default' : label.tone}>{label.text}</Chip>
+        </span>
       </div>
 
       <div className="list" style={{ boxShadow: 'none', margin: 0 }}>

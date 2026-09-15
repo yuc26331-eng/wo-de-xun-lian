@@ -118,7 +118,8 @@ check('训练结束生成今日总结', true);
 
 // 导出中文 PDF（真下载）
 const downloadPromise = page.waitForEvent('download', { timeout: 90000 });
-await page.getByRole('button', { name: /导出今日训练 PDF/ }).first().click();
+await page.getByTestId('open-export').click();
+await page.getByTestId('export-pdf').click();
 const download = await downloadPromise;
 const path = await download.path();
 const { stat, readFile } = await import('node:fs/promises');
@@ -136,6 +137,67 @@ const offlineOk = await page
   .catch(() => false);
 check('离线状态下仍可打开应用', offlineOk);
 await context.setOffline(false);
+
+// ---- v1.1 新增：今日总结六大分区 / 一键导出 / ChatGPT 报告 / 应用内更新 ----
+await page.goto(`${url}/#/summary`, { waitUntil: 'networkidle' });
+await page.getByTestId('summary-status').waitFor({ timeout: 20000 });
+const sections = await page
+  .locator('.collapse-head')
+  .evaluateAll((els) => els.map((el) => el.textContent ?? ''));
+check(
+  '今日总结包含六大分区',
+  ['训练记录', 'Apple Watch', '睡眠记录', '身体与恢复', '饮食和补剂', '当日自由记录'].every((t) =>
+    sections.some((s) => s.includes(t)),
+  ),
+  sections.length + ' 个分区',
+);
+
+await page.getByTestId('open-export').click();
+await page.getByText('查看 Markdown 预览').click();
+await page.getByTestId('export-preview').waitFor({ state: 'visible', timeout: 20000 });
+const previewText = (await page.getByTestId('export-preview').textContent()) ?? '';
+check(
+  '导出预览含 ChatGPT 说明与未记录标记',
+  previewText.includes('请根据以下日期范围内的原始训练') && previewText.includes('未记录'),
+);
+const mdWait = page.waitForEvent('download', { timeout: 60000 }).catch(() => null);
+await page.getByTestId('export-markdown').click();
+const mdDownload = await mdWait;
+check(
+  'Markdown 导出文件名正确',
+  Boolean(mdDownload && /^训练与恢复记录_\d{4}-\d{2}-\d{2}.*\.md$/.test(mdDownload.suggestedFilename())),
+  mdDownload?.suggestedFilename() ?? '未触发下载',
+);
+await page.keyboard.press('Escape');
+
+await page.goto(`${url}/#/summary?tab=chatgpt`, { waitUntil: 'networkidle' });
+const reportTab = await page.getByTestId('import-chatgpt-report').isVisible().catch(() => false);
+check('ChatGPT 报告页可导入 PDF 报告', reportTab);
+
+await page.goto(`${url}/#/me`, { waitUntil: 'networkidle' });
+await page.getByTestId('update-check').scrollIntoViewIfNeeded();
+const currentVersion = (await page.getByTestId('update-current').textContent()) ?? '';
+check('应用内更新面板显示当前版本', /v\d+\.\d+\.\d+/.test(currentVersion), currentVersion.trim());
+await page.getByTestId('update-check').click();
+const updateStatus = await page
+  .getByTestId('update-status')
+  .textContent({ timeout: 25000 })
+  .catch(() => '');
+check(
+  '检查更新返回明确状态',
+  /已是最新版本|发现新版本|正在检查/.test(updateStatus ?? ''),
+  updateStatus?.trim() ?? '无状态',
+);
+await page.screenshot({ path: `${out}/live-update-panel.png`, fullPage: true });
+
+// 线上 version.json 应为 v1.1.0
+const versionRes = await page.request.get(`${url}/version.json`);
+const versionJson = versionRes.ok() ? await versionRes.json() : null;
+check(
+  '线上版本信息正确',
+  versionJson?.version === '1.1.0' && Array.isArray(versionJson?.notes) && versionJson.notes.length > 0,
+  `version=${versionJson?.version}`,
+);
 
 await browser.close();
 
