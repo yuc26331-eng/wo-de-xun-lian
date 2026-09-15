@@ -51,12 +51,22 @@ export async function expectNoHorizontalScroll(page: Page): Promise<void> {
   const overflow = await page.evaluate(() => {
     const doc = document.documentElement;
     const body = document.body;
+    // 故意可横向滚动的容器（例如分段控件）不算页面溢出
+    const insideScroller = (el: HTMLElement): boolean => {
+      let node: HTMLElement | null = el.parentElement;
+      while (node && node !== body) {
+        const overflowX = getComputedStyle(node).overflowX;
+        if (overflowX === 'auto' || overflowX === 'scroll') return true;
+        node = node.parentElement;
+      }
+      return false;
+    };
     const widest = Math.max(
       doc.scrollWidth,
       body.scrollWidth,
-      ...Array.from(document.querySelectorAll<HTMLElement>('body *')).map((el) =>
-        Math.ceil(el.getBoundingClientRect().right + window.scrollX),
-      ),
+      ...Array.from(document.querySelectorAll<HTMLElement>('body *'))
+        .filter((el) => !insideScroller(el))
+        .map((el) => Math.ceil(el.getBoundingClientRect().right + window.scrollX)),
     );
     return { widest, viewport: window.innerWidth };
   });

@@ -268,22 +268,134 @@ export interface BodyMetric {
   updatedAt: ISODateTime;
 }
 
-/** 每日总结 / 日志（每天一条，id = date） */
+/* ------------------------------------------------------------------ */
+/* 今日总结（每天一条，id = date）                                       */
+/* ------------------------------------------------------------------ */
+
+/** Apple Watch 与运动数据（全部可选，未记录就留空） */
+export interface WatchData {
+  activeEnergyKcal?: number | null;
+  totalEnergyKcal?: number | null;
+  steps?: number | null;
+  exerciseMinutes?: number | null;
+  standHours?: number | null;
+  avgHr?: number | null;
+  maxHr?: number | null;
+  restingHr?: number | null;
+  /** 心率恢复（1 分钟下降值） */
+  hrRecovery?: number | null;
+  /** HRV（毫秒） */
+  hrvMs?: number | null;
+  bloodOxygenPct?: number | null;
+  note?: string;
+}
+
+export interface SleepData {
+  /** 上床时间 HH:mm */
+  bedTime?: string;
+  /** 入睡时间 HH:mm */
+  sleepTime?: string;
+  /** 起床时间 HH:mm */
+  wakeTime?: string;
+  totalHours?: number | null;
+  deepHours?: number | null;
+  coreHours?: number | null;
+  remHours?: number | null;
+  awakeHours?: number | null;
+  napMinutes?: number | null;
+  /** 主观睡眠质量 1-5 */
+  quality?: number | null;
+  note?: string;
+}
+
+export interface BodyRecovery {
+  weightKg?: number | null;
+  bodyFatPct?: number | null;
+  fatigue?: number | null;
+  soreness?: number | null;
+  mood?: number | null;
+  appetite?: number | null;
+  stress?: number | null;
+  injuryPain?: string;
+  recovery?: number | null;
+  overall?: string;
+}
+
+export interface MealLog {
+  breakfast?: string;
+  lunch?: string;
+  dinner?: string;
+  snack?: string;
+  /** 饮水量 ml */
+  waterMl?: number | null;
+  /** 当日饮食自由记录（v1 的 diet 字段会迁移到这里） */
+  note?: string;
+}
+
+export interface SupplementLog {
+  proteinScoops?: number | null;
+  proteinG?: number | null;
+  creatineG?: number | null;
+  /** 咖啡因 mg */
+  caffeineMg?: number | null;
+  others?: string;
+}
+
+export interface TrainingSection {
+  kind?: SessionKind | null;
+  items?: string;
+  exercises?: string;
+  durationMin?: number | null;
+  runDistanceKm?: number | null;
+  runPaceText?: string;
+  rpe?: number | null;
+  completionPct?: number | null;
+  /** 训练容量 kg（可从训练记录自动带出，也可手改） */
+  volumeKg?: number | null;
+  feeling?: string;
+  /** 比赛或足球训练表现 */
+  matchPerformance?: string;
+  painSites?: string[];
+}
+
+export type AttachmentKind = 'watch' | 'sleep' | 'other';
+
+/** 附件元数据（截图随每日总结保存） */
+export interface AttachmentMeta {
+  id: string;
+  date: ISODate;
+  kind: AttachmentKind;
+  name: string;
+  type: string;
+  size: number;
+  createdAt: ISODateTime;
+}
+
+/** IndexedDB 中真实存储的附件（含二进制内容） */
+export interface StoredAttachment extends AttachmentMeta {
+  blob: Blob;
+}
+
 export interface DailyLog {
   id: string;
   date: ISODate;
+  /** —— 结构化分区（v2 新增） —— */
+  training?: TrainingSection;
+  watch?: WatchData;
+  sleep?: SleepData;
+  body?: BodyRecovery;
+  meals?: MealLog;
+  freeNote?: string;
+  attachmentIds?: string[];
+  markedComplete?: boolean;
+  /** —— v1 兼容字段（旧数据继续可用） —— */
   weightKg?: number | null;
   trainingContent?: string;
   trainingVolumeKg?: number | null;
   rpe?: number | null;
   sleepHours?: number | null;
   diet?: string;
-  supplements?: {
-    proteinScoops?: number | null;
-    proteinG?: number | null;
-    creatineG?: number | null;
-    others?: string;
-  };
+  supplements?: SupplementLog;
   pain?: string;
   feeling?: string;
   fatigue?: number | null;
@@ -292,6 +404,31 @@ export interface DailyLog {
   source?: DataSource;
   createdAt: ISODateTime;
   updatedAt: ISODateTime;
+}
+
+/* ------------------------------------------------------------------ */
+/* ChatGPT 分析报告（与每日原始记录分开保存，通过日期范围关联）            */
+/* ------------------------------------------------------------------ */
+
+export interface ChatGptReport {
+  id: string;
+  title: string;
+  startDate: ISODate;
+  endDate: ISODate;
+  createdAt: ISODateTime;
+  updatedAt: ISODateTime;
+  summaryText: string;
+  bodyText: string;
+  evaluation?: string;
+  suggestions?: string;
+  risks?: string;
+  rawText?: string;
+  pdfBlob?: Blob;
+  fileName?: string;
+  pdfSize?: number;
+  note?: string;
+  tags: string[];
+  parseWarnings?: string[];
 }
 
 /* ------------------------------------------------------------------ */
@@ -474,5 +611,7 @@ export interface BackupFile {
     settings: AppSettings | null;
     liveSession: LiveSession | null;
     pdfImports: PdfImportRecord[];
+    chatGptReports?: ChatGptReport[];
+    attachments?: AttachmentMeta[];
   };
 }

@@ -1,11 +1,13 @@
 /**
- * 总结
- * 今日总结 / 训练报告 / PDF 导入 / 导出中文 PDF
+ * 总结（底部导航一级页面）
+ * 1) 今日记录：每天一份原始数据（训练 / Apple Watch / 睡眠 / 身体 / 饮食 / 自由记录），输入即自动保存
+ * 2) 我的每日记录：日历 + 列表两种视图，按日期范围筛选，可编辑 / 删除 / 复制
+ * 3) ChatGPT 分析报告：导入 PDF 报告并按日期范围与原始记录对照（与每日原始记录分开保存）
+ * 顶部提供「一键导出给 ChatGPT」（PDF / Markdown / JSON / 纯文本）
  */
-import { useEffect, useMemo, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Page } from '../components/Page';
-import { PdfDropZone, PdfImportButton } from '../components/PdfImportButton';
 import {
   Button,
   Card,
@@ -13,501 +15,768 @@ import {
   Confirm,
   EmptyState,
   Field,
-  ListRow,
-  NumberInput,
   SectionTitle,
   Segmented,
   Sheet,
-  Stat,
-  Stepper,
-  TextArea,
+  TextInput,
   useToast,
 } from '../components/ui';
 import { IconShare, IconTrash } from '../components/icons';
-import { exportSummaryPdf } from '../lib/report/exportPdf';
-import { PAIN_SITES } from '../lib/session';
+import { SummaryForm } from '../components/summary/SummaryForm';
+import { ExportDialog } from '../components/summary/ExportDialog';
+import { ImportChatGptReportButton } from '../components/ImportChatGptReportButton';
+import { useAppData } from '../state/AppData';
 import {
   KIND_EMOJI,
+  addDays,
+  dayDiff,
   formatDateCN,
   formatDateShort,
   formatDurationCN,
-  formatNumber,
   formatVolume,
+  parseISODate,
   toISODate,
 } from '../lib/format';
-import { useAppData } from '../state/AppData';
-import { PDF_KIND_LABEL, type WorkoutSummary } from '../types';
+import { dailyLogHeadline, dailyProgress } from '../lib/summary/sections';
+import type { ChatGptReport, DailyLog, ISODate, WorkoutSummary } from '../types';
 
-type Tab = 'today' | 'reports' | 'import';
+type Tab = 'today' | 'records' | 'chatgpt';
 
-function CardioTable({ summary }: { summary: WorkoutSummary }) {
-  if (!summary.cardio.length) return null;
-  return (
-    <div className="table-scroll" style={{ marginTop: 10 }}>
-      <table className="data-table">
-        <thead>
-          <tr>
-            <th>项目</th>
-            <th className="num">时间</th>
-            <th className="num">距离</th>
-            <th className="num">配速</th>
-            <th className="num">心率</th>
-          </tr>
-        </thead>
-        <tbody>
-          {summary.cardio.map((c) => (
-            <tr key={`${c.exerciseName}-${c.durationSec}`}>
-              <td>{c.exerciseName}</td>
-              <td className="num">{c.durationSec ? formatDurationCN(c.durationSec) : '—'}</td>
-              <td className="num">{c.distanceKm ? `${formatNumber(c.distanceKm, 2)} km` : '—'}</td>
-              <td className="num">{c.paceText ?? '—'}</td>
-              <td className="num">{c.avgHr ? `${c.avgHr}` : '—'}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
+const WEEKDAY = ['日', '一', '二', '三', '四', '五', '六'];
+
+function dayList(start: ISODate, end: ISODate): ISODate[] {
+  const out: ISODate[] = [];
+  const diff = dayDiff(end, start);
+  for (let i = 0; i <= diff; i += 1) out.push(addDays(start, i));
+  return out;
 }
 
-function SummaryDetail({ summary }: { summary: WorkoutSummary }) {
+/** 简易月历：显示哪些日期有记录 */
+function MonthCalendar({
+  month,
+  onMonthChange,
+  hasRecord,
+  selected,
+  onSelect,
+}: {
+  month: string;
+  onMonthChange: (month: string) => void;
+  hasRecord: (date: ISODate) => boolean;
+  selected: ISODate;
+  onSelect: (date: ISODate) => void;
+}) {
+  const [y, m] = month.split('-').map(Number);
+  const daysInMonth = new Date(y, m, 0).getDate();
+  const startOffset = new Date(y, m - 1, 1).getDay();
+  const cells: (ISODate | null)[] = [
+    ...Array.from({ length: startOffset }, () => null),
+    ...Array.from(
+      { length: daysInMonth },
+      (_, i) => `${month}-${`${i + 1}`.padStart(2, '0')}` as ISODate,
+    ),
+  ];
+  const today = toISODate();
+
+  function shift(delta: number) {
+    const d = new Date(y, m - 1 + delta, 1);
+    onMonthChange(`${d.getFullYear()}-${`${d.getMonth() + 1}`.padStart(2, '0')}`);
+  }
+
   return (
     <div>
-      <div className="stat-grid three">
-        <Stat label="完成率" value={`${Math.round(summary.completionRate * 100)}%`} />
-        <Stat label="总时长" value={formatDurationCN(summary.totalDurationSec)} />
-        <Stat label="总容量" value={formatVolume(summary.totalVolumeKg)} />
+      <div className="row-between" style={{ marginBottom: 8 }}>
+        <Button size="sm" onClick={() => shift(-1)}>
+          ‹ 上月
+        </Button>
+        <span className="strong">
+          {y} 年 {m} 月
+        </span>
+        <Button size="sm" onClick={() => shift(1)}>
+          下月 ›
+        </Button>
       </div>
-      <div className="stat-grid three" style={{ marginTop: 10 }}>
-        <Stat label="总组数" value={summary.totalSets} />
-        <Stat label="总次数" value={summary.totalReps} />
-        <Stat label="RPE" value={summary.rpe ?? '—'} />
+      <div className="cal-head">
+        {WEEKDAY.map((w) => (
+          <span key={w}>{w}</span>
+        ))}
       </div>
-
-      {summary.completedExercises.length > 0 && (
-        <>
-          <div className="small muted" style={{ margin: '14px 0 6px' }}>
-            完成动作（{summary.completedExercises.length}）
-          </div>
-          <div className="wrap" style={{ gap: 6 }}>
-            {summary.completedExercises.map((n) => (
-              <Chip key={n} tone="green">
-                {n}
-              </Chip>
-            ))}
-          </div>
-        </>
-      )}
-      {summary.skippedExercises.length > 0 && (
-        <>
-          <div className="small muted" style={{ margin: '14px 0 6px' }}>
-            跳过动作（{summary.skippedExercises.length}）
-          </div>
-          <div className="wrap" style={{ gap: 6 }}>
-            {summary.skippedExercises.map((n) => (
-              <Chip key={n} tone="orange">
-                {n}
-              </Chip>
-            ))}
-          </div>
-        </>
-      )}
-
-      <CardioTable summary={summary} />
-
-      {summary.painSites && summary.painSites.length > 0 && (
-        <div className="small" style={{ marginTop: 12, color: 'var(--orange)' }}>
-          疼痛部位：{summary.painSites.join('、')}
-        </div>
-      )}
-      {(summary.feeling || summary.note) && (
-        <div className="small" style={{ marginTop: 12 }}>
-          {summary.feeling && <div>感受：{summary.feeling}</div>}
-          {summary.note && <div style={{ marginTop: 4 }}>备注：{summary.note}</div>}
-        </div>
-      )}
-      <div className="tiny muted" style={{ marginTop: 12 }}>
-        {formatDateCN(summary.date)} · {formatDurationCN(summary.totalDurationSec)} ·{' '}
-        {summary.bodyWeightKg ? `体重 ${formatNumber(summary.bodyWeightKg)}kg` : '未记录体重'}
+      <div className="cal-grid">
+        {cells.map((date, i) => {
+          if (!date) return <span key={`empty-${i}`} className="cal-cell empty" />;
+          const filled = hasRecord(date);
+          return (
+            <button
+              key={date}
+              className={`cal-cell ${filled ? 'filled' : ''} ${
+                date === today ? 'today' : ''
+              } ${date === selected ? 'selected' : ''}`}
+              onClick={() => onSelect(date)}
+              data-testid={`cal-${date}`}
+            >
+              <span>{Number(date.slice(-2))}</span>
+              {filled && <i className="cal-dot" />}
+            </button>
+          );
+        })}
+      </div>
+      <div className="tiny muted" style={{ marginTop: 6 }}>
+        有蓝点的日期表示当天已有记录；点日期可直接编辑。
       </div>
     </div>
   );
 }
 
 export default function SummaryPage() {
+  const navigate = useNavigate();
   const toast = useToast();
+  const [params, setParams] = useSearchParams();
   const {
     ready,
-    summaries,
-    plans,
-    bodyMetrics,
     dailyLogs,
-    pdfImports,
-    deletePdfImport,
+    summaries,
+    chatGptReports,
     saveDailyLog,
-    saveSummary,
-    saveBodyMetric,
-    deleteSummary,
+    deleteDailyLog,
+    copyDailyLog,
+    deleteChatGptReport,
+    renameChatGptReport,
+    loadReportPdf,
   } = useAppData();
 
   const today = toISODate();
-  const [searchParams] = useSearchParams();
-  const requestedDate = searchParams.get('date');
-  // 跟练结束后会跳到 /summary?date=YYYY-MM-DD，这里允许查看指定日期
+  const tab = ((params.get('tab') as Tab) ?? 'today') as Tab;
+  const dateParam = params.get('date');
   const activeDate =
-    requestedDate && /^\d{4}-\d{2}-\d{2}$/.test(requestedDate) ? requestedDate : today;
-  const [tab, setTab] = useState<Tab>('today');
-  const [detail, setDetail] = useState<WorkoutSummary | null>(null);
-  const [exporting, setExporting] = useState<string | null>(null);
-  const [confirmDelete, setConfirmDelete] = useState<WorkoutSummary | null>(null);
+    dateParam && /^\d{4}-\d{2}-\d{2}$/.test(dateParam) ? (dateParam as ISODate) : today;
 
-  const todaySummary = useMemo(
-    () =>
-      summaries
-        .filter((s) => s.date === activeDate)
-        .sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1))[0] ?? null,
-    [summaries, activeDate],
-  );
-  const log = useMemo(() => dailyLogs.find((d) => d.date === activeDate) ?? null, [dailyLogs, activeDate]);
-  const todayMetric = useMemo(
-    () => bodyMetrics.find((m) => m.date === activeDate) ?? null,
-    [bodyMetrics, activeDate],
-  );
-
-  const [weight, setWeight] = useState<number | null>(null);
-  const [rpe, setRpe] = useState(6);
-  const [fatigue, setFatigue] = useState(3);
-  const [feeling, setFeeling] = useState('');
-  const [note, setNote] = useState('');
-  const [painSites, setPainSites] = useState<string[]>([]);
-  const [trainingContent, setTrainingContent] = useState('');
-  const [saving, setSaving] = useState(false);
+  const [exportOpen, setExportOpen] = useState(false);
+  const [exportRange, setExportRange] = useState({ start: today, end: today });
+  const [copyOpen, setCopyOpen] = useState(false);
+  const [copyTarget, setCopyTarget] = useState<ISODate>(addDays(activeDate, 1));
+  const [calendarOpen, setCalendarOpen] = useState(false);
+  const [view, setView] = useState<'list' | 'calendar'>('list');
+  const [rangeStart, setRangeStart] = useState<ISODate>(addDays(today, -6));
+  const [rangeEnd, setRangeEnd] = useState<ISODate>(today);
+  const [month, setMonth] = useState(today.slice(0, 7));
+  const [confirmTarget, setConfirmTarget] = useState<string | null>(null);
+  const [detailReport, setDetailReport] = useState<ChatGptReport | null>(null);
+  const [renameValue, setRenameValue] = useState('');
 
   useEffect(() => {
-    setWeight(todaySummary?.bodyWeightKg ?? todayMetric?.weightKg ?? log?.weightKg ?? null);
-    setRpe(todaySummary?.rpe ?? log?.rpe ?? 6);
-    setFatigue(todaySummary?.fatigue ?? log?.fatigue ?? 3);
-    setFeeling(todaySummary?.feeling ?? log?.feeling ?? '');
-    setNote(todaySummary?.note ?? log?.note ?? '');
-    setPainSites(todaySummary?.painSites ?? (log?.pain ? log.pain.split(/[、,，]/).filter(Boolean) : []));
-    setTrainingContent(
-      log?.trainingContent ??
-        (todaySummary ? `${todaySummary.planTitle}（${todaySummary.completedExercises.join('、')}）` : ''),
-    );
-  }, [todaySummary, todayMetric, log]);
+    const s = params.get('start');
+    const e = params.get('end');
+    if (s && /^\d{4}-\d{2}-\d{2}$/.test(s)) setRangeStart(s as ISODate);
+    if (e && /^\d{4}-\d{2}-\d{2}$/.test(e)) setRangeEnd(e as ISODate);
+  }, [params]);
 
-  const recent = useMemo(
-    () => [...summaries].sort((a, b) => (a.date < b.date ? 1 : -1)).slice(0, 40),
-    [summaries],
+  const setTab = useCallback(
+    (next: Tab) => {
+      const p = new URLSearchParams(params);
+      p.set('tab', next);
+      setParams(p, { replace: true });
+    },
+    [params, setParams],
   );
 
-  async function saveToday() {
-    if (saving) return;
-    setSaving(true);
-    try {
-      await saveDailyLog({
-        date: activeDate,
-        weightKg: weight,
-        rpe,
-        fatigue,
-        feeling: feeling.trim(),
-        note: note.trim(),
-        pain: painSites.join('、'),
-        trainingContent: trainingContent.trim(),
-        trainingVolumeKg: todaySummary?.totalVolumeKg ?? null,
-        summaryId: todaySummary?.id,
-      });
-      if (weight != null) await saveBodyMetric({ date: activeDate, weightKg: weight });
-      if (todaySummary) {
-        await saveSummary({
-          ...todaySummary,
-          rpe,
-          fatigue,
-          feeling: feeling.trim(),
-          note: note.trim(),
-          painSites: painSites.length ? painSites : undefined,
-          bodyWeightKg: weight ?? todaySummary.bodyWeightKg,
-        });
-      }
-      toast('今日总结已保存到历史', 'success');
-    } finally {
-      setSaving(false);
-    }
-  }
+  const setActiveDate = useCallback(
+    (next: ISODate) => {
+      const p = new URLSearchParams(params);
+      p.set('date', next);
+      setParams(p, { replace: true });
+    },
+    [params, setParams],
+  );
 
-  async function exportPdf(summary: WorkoutSummary) {
-    setExporting(summary.id);
-    try {
-      await exportSummaryPdf({
-        summary,
-        plan: plans.find((p) => p.id === summary.planId) ?? null,
-        metrics: bodyMetrics,
-        dailyLog: dailyLogs.find((d) => d.date === summary.date) ?? null,
-      });
-      toast('PDF 已生成', 'success');
-    } catch (err) {
-      toast(err instanceof Error ? err.message : 'PDF 导出失败', 'error');
-    } finally {
-      setExporting(null);
-    }
-  }
+  const logByDate = useMemo(() => {
+    const map = new Map<string, DailyLog>();
+    dailyLogs.forEach((d) => map.set(d.date, d));
+    return map;
+  }, [dailyLogs]);
+
+  const summaryByDate = useMemo(() => {
+    const map = new Map<string, WorkoutSummary[]>();
+    summaries.forEach((s) => map.set(s.date, [...(map.get(s.date) ?? []), s]));
+    return map;
+  }, [summaries]);
+
+  const activeLog = logByDate.get(activeDate) ?? null;
+  const activeSummary = summaryByDate.get(activeDate)?.[0] ?? null;
+  const activeProgress = dailyProgress(activeLog);
+
+  const rangeDays = useMemo(() => {
+    const start = rangeStart <= rangeEnd ? rangeStart : rangeEnd;
+    const end = rangeStart <= rangeEnd ? rangeEnd : rangeStart;
+    return dayList(start, end);
+  }, [rangeStart, rangeEnd]);
+
+  const reportsSorted = useMemo(
+    () => [...chatGptReports].sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1)),
+    [chatGptReports],
+  );
 
   if (!ready) {
     return (
-      <Page title="总结">
-        <div className="skeleton" style={{ height: 200 }} />
+      <Page title="今日总结">
+        <div className="skeleton" style={{ height: 220 }} />
       </Page>
     );
   }
 
   return (
-    <Page title="总结" sub={formatDateCN(activeDate)}>
+    <Page
+      title="今日总结"
+      sub={tab === 'today' ? formatDateCN(activeDate) : '记录原始数据，导出给 ChatGPT 分析'}
+      right={
+        <button className="icon-btn" aria-label="选择日期" onClick={() => setCalendarOpen(true)}>
+          📅
+        </button>
+      }
+    >
       <Segmented<Tab>
         value={tab}
         onChange={setTab}
         options={[
-          { value: 'today', label: '今日总结' },
-          { value: 'reports', label: '训练报告' },
-          { value: 'import', label: 'PDF 导入' },
+          { value: 'today', label: '今日记录' },
+          { value: 'records', label: '我的每日记录' },
+          { value: 'chatgpt', label: 'ChatGPT 报告' },
         ]}
       />
 
+      <Button
+        block
+        size="lg"
+        variant="primary"
+        style={{ marginTop: 12 }}
+        data-testid="open-export"
+        onClick={() => {
+          setExportRange(
+            tab === 'today'
+              ? { start: activeDate, end: activeDate }
+              : { start: rangeStart, end: rangeEnd },
+          );
+          setExportOpen(true);
+        }}
+      >
+        <IconShare width={18} height={18} style={{ marginRight: 6 }} />
+        一键导出给 ChatGPT
+      </Button>
+
+      {/* ---------------- 1) 今日记录 ---------------- */}
       {tab === 'today' && (
         <div style={{ marginTop: 14 }}>
-          {todaySummary ? (
-            <Card>
-              <div className="row-between" style={{ marginBottom: 10 }}>
+          <Card flat>
+            <div className="row-between">
+              <div className="grow">
+                <div className="small muted">记录日期</div>
                 <div className="strong" style={{ fontSize: 17 }}>
-                  {KIND_EMOJI[todaySummary.kind]} {todaySummary.planTitle}
+                  {formatDateCN(activeDate)}
                 </div>
-                <Chip tone="green">完成 {Math.round(todaySummary.completionRate * 100)}%</Chip>
               </div>
-              <SummaryDetail summary={todaySummary} />
-              <Button
-                block
-                size="lg"
-                variant="primary"
-                style={{ marginTop: 14 }}
-                disabled={exporting === todaySummary.id}
-                onClick={() => void exportPdf(todaySummary)}
-              >
-                <IconShare width={18} height={18} style={{ marginRight: 6 }} />
-                {exporting === todaySummary.id ? '正在生成 PDF…' : '导出今日训练 PDF'}
-              </Button>
-              <div className="tiny muted center" style={{ marginTop: 8 }}>
-                PDF 内嵌中文字体（约 2-3MB），中文不会乱码、内容不会被截断
+              <div className="row wrap" style={{ gap: 6 }}>
+                <Button size="sm" onClick={() => setActiveDate(addDays(activeDate, -1))}>
+                  ‹ 前一天
+                </Button>
+                <Button size="sm" disabled={activeDate === today} onClick={() => setActiveDate(today)}>
+                  今天
+                </Button>
+                <Button
+                  size="sm"
+                  disabled={activeDate >= today}
+                  onClick={() => setActiveDate(addDays(activeDate, 1))}
+                >
+                  后一天 ›
+                </Button>
+              </div>
+            </div>
+            <div className="tiny muted" style={{ marginTop: 6 }}>
+              {activeProgress.hasAny
+                ? `已填写 ${activeProgress.filled}/${activeProgress.total} 项，自动保存中`
+                : '这一天还没有记录，填写任意一项就会自动保存'}
+            </div>
+          </Card>
+
+          {activeSummary && (
+            <Card>
+              <div className="row-between">
+                <span className="strong">
+                  {KIND_EMOJI[activeSummary.kind]} {activeSummary.planTitle}
+                </span>
+                <Chip tone="green">完成 {Math.round(activeSummary.completionRate * 100)}%</Chip>
+              </div>
+              <div className="tiny muted" style={{ marginTop: 6 }}>
+                {formatDurationCN(activeSummary.totalDurationSec)} · 容量{' '}
+                {formatVolume(activeSummary.totalVolumeKg)} · {activeSummary.totalSets} 组
+              </div>
+              <div className="row" style={{ gap: 10, marginTop: 10 }}>
+                <Button size="sm" onClick={() => navigate('/history')}>
+                  查看训练报告
+                </Button>
+                <Button
+                  size="sm"
+                  data-testid="fill-from-workout"
+                  onClick={async () => {
+                    const existing = activeLog?.training ?? {};
+                    await saveDailyLog({
+                      date: activeDate,
+                      training: {
+                        ...existing,
+                        kind: activeSummary.kind,
+                        items: existing.items || activeSummary.planTitle,
+                        exercises:
+                          existing.exercises ||
+                          activeSummary.completedExercises.join('、'),
+                        durationMin:
+                          existing.durationMin ??
+                          Math.round(activeSummary.totalDurationSec / 60),
+                        rpe: existing.rpe ?? activeSummary.rpe ?? null,
+                        completionPct:
+                          existing.completionPct ??
+                          Math.round(activeSummary.completionRate * 100),
+                        volumeKg: existing.volumeKg ?? activeSummary.totalVolumeKg,
+                        feeling: existing.feeling || activeSummary.feeling || '',
+                        painSites:
+                          existing.painSites?.length
+                            ? existing.painSites
+                            : (activeSummary.painSites ?? []),
+                      },
+                    });
+                    toast('已从训练记录带入，可继续补充', 'success');
+                  }}
+                >
+                  从训练记录带入
+                </Button>
               </div>
             </Card>
-          ) : (
+          )}
+
+          <SummaryForm
+            date={activeDate}
+            log={activeLog}
+            onCopyRequest={() => {
+              setCopyTarget(addDays(activeDate, 1));
+              setCopyOpen(true);
+            }}
+            onExportRequest={() => {
+              setExportRange({ start: activeDate, end: activeDate });
+              setExportOpen(true);
+            }}
+            onDeleted={() => setActiveDate(today)}
+          />
+        </div>
+      )}
+
+      {/* ---------------- 2) 我的每日记录 ---------------- */}
+      {tab === 'records' && (
+        <div style={{ marginTop: 14 }}>
+          <Card>
+            <div className="row-between" style={{ marginBottom: 10 }}>
+              <span className="strong">查看方式</span>
+              <Segmented<'list' | 'calendar'>
+                value={view}
+                onChange={setView}
+                options={[
+                  { value: 'list', label: '列表' },
+                  { value: 'calendar', label: '日历' },
+                ]}
+              />
+            </div>
+            {view === 'list' ? (
+              <>
+                <div className="form-row">
+                  <div className="grow">
+                    <Field label="开始日期">
+                      <input
+                        className="input"
+                        type="date"
+                        value={rangeStart}
+                        data-testid="records-start"
+                        onChange={(e) => setRangeStart(e.target.value as ISODate)}
+                      />
+                    </Field>
+                  </div>
+                  <div className="grow">
+                    <Field label="结束日期">
+                      <input
+                        className="input"
+                        type="date"
+                        value={rangeEnd}
+                        data-testid="records-end"
+                        onChange={(e) => setRangeEnd(e.target.value as ISODate)}
+                      />
+                    </Field>
+                  </div>
+                </div>
+                <div className="wrap" style={{ gap: 6, marginTop: 10 }}>
+                  {[1, 3, 7, 10, 30].map((n) => (
+                    <button
+                      key={n}
+                      className="chip"
+                      onClick={() => {
+                        setRangeEnd(today);
+                        setRangeStart(addDays(today, -(n - 1)));
+                      }}
+                    >
+                      最近 {n} 天
+                    </button>
+                  ))}
+                </div>
+              </>
+            ) : (
+              <MonthCalendar
+                month={month}
+                onMonthChange={setMonth}
+                hasRecord={(d) => logByDate.has(d) || summaryByDate.has(d)}
+                selected={activeDate}
+                onSelect={(d) => {
+                  setActiveDate(d);
+                  setTab('today');
+                }}
+              />
+            )}
+          </Card>
+
+          {view === 'list' && (
+            <Card>
+              <div className="row-between" style={{ marginBottom: 8 }}>
+                <span className="strong">
+                  共 {rangeDays.length} 天 · 已记录{' '}
+                  {rangeDays.filter((d) => logByDate.has(d) || summaryByDate.has(d)).length} 天
+                </span>
+                <Chip tone="orange">
+                  缺失 {rangeDays.filter((d) => !logByDate.has(d) && !summaryByDate.has(d)).length} 天
+                </Chip>
+              </div>
+              {rangeDays.map((d) => {
+                const log = logByDate.get(d) ?? null;
+                const sum = summaryByDate.get(d)?.[0];
+                const empty = !log && !sum;
+                const p = dailyProgress(log);
+                return (
+                  <div key={d} className="day-row" data-testid={`day-row-${d}`}>
+                    <button
+                      className="day-main"
+                      onClick={() => {
+                        setActiveDate(d);
+                        setTab('today');
+                      }}
+                    >
+                      <span className="day-date">
+                        {formatDateShort(d)}
+                        <span className="tiny muted"> 周{WEEKDAY[parseISODate(d).getDay()]}</span>
+                      </span>
+                      <span className={`day-summary ${empty ? 'muted' : ''}`}>
+                        {empty ? '未记录' : dailyLogHeadline(log)}
+                        {sum ? ` · 训练 ${sum.planTitle}` : ''}
+                      </span>
+                      <span className="tiny muted nowrap">
+                        {empty ? '' : `${Math.round(p.ratio * 100)}%`}
+                      </span>
+                    </button>
+                    <div className="day-actions">
+                      <button
+                        aria-label={`复制 ${d}`}
+                        onClick={() => {
+                          setActiveDate(d);
+                          setCopyTarget(addDays(d, 1));
+                          setCopyOpen(true);
+                        }}
+                      >
+                        ⧉
+                      </button>
+                      <button
+                        aria-label={`删除 ${d}`}
+                        className="danger"
+                        onClick={() => setConfirmTarget(d)}
+                      >
+                        <IconTrash width={15} height={15} />
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </Card>
+          )}
+
+          <Button block onClick={() => navigate('/history')}>
+            查看训练历史与训练报告 PDF
+          </Button>
+        </div>
+      )}
+
+      {/* ---------------- 3) ChatGPT 分析报告 ---------------- */}
+      {tab === 'chatgpt' && (
+        <div style={{ marginTop: 14 }}>
+          <Card>
+            <div className="strong" style={{ marginBottom: 6 }}>
+              导入 ChatGPT 生成的报告
+            </div>
+            <div className="tiny muted" style={{ marginBottom: 10 }}>
+              支持 1 天 / 3 天 / 5 天 / 7 天 / 10 天或任意日期范围的分析报告；解析后先预览再保存，
+              不会覆盖你每天填写的原始记录。
+            </div>
+            <ImportChatGptReportButton block size="lg" />
+          </Card>
+
+          <SectionTitle>{`已保存的报告（${reportsSorted.length}）`}</SectionTitle>
+          {reportsSorted.length === 0 ? (
             <Card>
               <EmptyState
-                emoji="📝"
-                title="今天还没有训练记录"
-                desc="完成一次训练后会自动生成总结，也可以先手动记录今天的感受"
+                emoji="🧠"
+                title="还没有导入过 ChatGPT 报告"
+                desc="导入后可按日期范围与原始记录对照查看，也可以重命名和删除"
               />
             </Card>
+          ) : (
+            <Card>
+              {reportsSorted.map((r) => (
+                <button
+                  key={r.id}
+                  className="report-row"
+                  data-testid={`report-row-${r.id}`}
+                  onClick={() => {
+                    setDetailReport(r);
+                    setRenameValue(r.title);
+                  }}
+                >
+                  <span className="grow" style={{ minWidth: 0, textAlign: 'left' }}>
+                    <span className="strong truncate" style={{ display: 'block' }}>
+                      {r.title}
+                    </span>
+                    <span className="tiny muted">
+                      {r.startDate} ~ {r.endDate} ·{' '}
+                      {r.startDate === r.endDate
+                        ? '单日'
+                        : `${dayDiff(r.endDate, r.startDate) + 1} 天`}
+                      {r.tags.length ? ` · ${r.tags.join(' / ')}` : ''}
+                    </span>
+                  </span>
+                  <span className="chev">›</span>
+                </button>
+              ))}
+            </Card>
           )}
+        </div>
+      )}
 
-          <SectionTitle>今日感受与身体反馈</SectionTitle>
-          <Card>
-            <div className="row" style={{ gap: 10 }}>
-              <div className="grow">
-                <Field label="体重（kg）">
-                  <NumberInput value={weight} onChange={setWeight} placeholder="例如 68.5" testId="summary-weight" />
-                </Field>
-              </div>
-              <div className="grow">
-                <Field label="训练 RPE">
-                  <Stepper value={rpe} min={1} max={10} onChange={setRpe} />
-                </Field>
-              </div>
-              <div className="grow">
-                <Field label="疲劳程度">
-                  <Stepper value={fatigue} min={1} max={5} onChange={setFatigue} />
-                </Field>
-              </div>
-            </div>
+      {/* ---------------- 弹层：日期选择 ---------------- */}
+      <Sheet open={calendarOpen} onClose={() => setCalendarOpen(false)} title="选择日期">
+        <MonthCalendar
+          month={month}
+          onMonthChange={setMonth}
+          hasRecord={(d) => logByDate.has(d) || summaryByDate.has(d)}
+          selected={activeDate}
+          onSelect={(d) => {
+            setActiveDate(d);
+            setTab('today');
+            setCalendarOpen(false);
+          }}
+        />
+      </Sheet>
 
-            <div style={{ marginTop: 12 }}>
-              <div className="small muted" style={{ marginBottom: 6 }}>
-                疼痛 / 不适部位（可多选）
-              </div>
-              <div className="wrap" style={{ gap: 6 }}>
-                {PAIN_SITES.map((site) => {
-                  const active = painSites.includes(site);
-                  return (
-                    <button
-                      key={site}
-                      className={`chip tap ${active ? 'red' : ''}`}
-                      aria-pressed={active}
-                      onClick={() =>
-                        setPainSites((prev) =>
-                          prev.includes(site) ? prev.filter((s) => s !== site) : [...prev, site],
-                        )
-                      }
-                    >
-                      {site}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
+      {/* ---------------- 弹层：复制到其他日期 ---------------- */}
+      <Sheet open={copyOpen} onClose={() => setCopyOpen(false)} title="复制到其他日期">
+        <Field label="目标日期">
+          <input
+            className="input"
+            type="date"
+            value={copyTarget}
+            data-testid="copy-target"
+            onChange={(e) => setCopyTarget(e.target.value as ISODate)}
+          />
+        </Field>
+        <div className="tiny muted" style={{ marginTop: 8 }}>
+          复制的只是填写内容（不含截图附件）；目标日期已有记录时会合并更新，不会产生重复条目。
+        </div>
+        <Button
+          block
+          size="lg"
+          variant="primary"
+          style={{ marginTop: 12 }}
+          data-testid="copy-confirm"
+          onClick={async () => {
+            try {
+              await copyDailyLog(activeDate, copyTarget);
+              toast(`已复制到 ${copyTarget}`, 'success');
+              setCopyOpen(false);
+              setActiveDate(copyTarget);
+            } catch (err) {
+              toast(err instanceof Error ? err.message : '复制失败', 'error');
+            }
+          }}
+        >
+          确认复制
+        </Button>
+      </Sheet>
 
-            <div style={{ marginTop: 12 }}>
-              <Field label="训练内容">
-                <TextArea
-                  value={trainingContent}
-                  onChange={setTrainingContent}
-                  rows={2}
-                  placeholder="例如：下肢力量，深蹲 4×5 @90kg"
-                />
-              </Field>
+      {/* ---------------- 弹层：报告详情 ---------------- */}
+      <Sheet
+        open={detailReport !== null}
+        onClose={() => setDetailReport(null)}
+        title={detailReport?.title ?? '分析报告'}
+      >
+        {detailReport && (
+          <div>
+            <div className="wrap" style={{ gap: 6 }}>
+              <Chip tone="purple">
+                {detailReport.startDate} ~ {detailReport.endDate}
+              </Chip>
+              {detailReport.tags.map((t) => (
+                <Chip key={t}>{t}</Chip>
+              ))}
             </div>
-            <div style={{ marginTop: 12 }}>
-              <Field label="今日感受">
-                <TextArea
-                  value={feeling}
-                  onChange={setFeeling}
-                  rows={2}
-                  placeholder="例如：状态不错，最后一组有点吃力"
-                  testId="summary-feeling"
-                />
-              </Field>
-            </div>
-            <div style={{ marginTop: 12 }}>
-              <Field label="备注">
-                <TextArea value={note} onChange={setNote} rows={2} placeholder="睡眠、饮食、补剂、伤病等" />
-              </Field>
-            </div>
+            {detailReport.parseWarnings?.length ? (
+              <div className="tiny muted" style={{ marginTop: 8 }}>
+                解析提示：{detailReport.parseWarnings.join('；')}
+              </div>
+            ) : null}
+
+            <Field label="重命名">
+              <TextInput value={renameValue} onChange={setRenameValue} />
+            </Field>
             <Button
               block
-              variant="primary"
-              size="lg"
-              style={{ marginTop: 14 }}
-              disabled={saving}
-              onClick={() => void saveToday()}
-              data-testid="save-daily-summary"
+              style={{ marginTop: 8 }}
+              onClick={async () => {
+                await renameChatGptReport(detailReport.id, renameValue);
+                setDetailReport({ ...detailReport, title: renameValue });
+                toast('已重命名', 'success');
+              }}
             >
-              {saving ? '保存中…' : '保存到历史'}
+              保存名称
             </Button>
-          </Card>
-        </div>
-      )}
 
-      {tab === 'reports' && (
-        <div style={{ marginTop: 14 }}>
-          {recent.length === 0 ? (
-            <Card>
-              <EmptyState emoji="📊" title="还没有训练报告" desc="完成训练后可以在这里查看与导出 PDF" />
-            </Card>
-          ) : (
-            <>
-              <div className="list">
-                {recent.map((s) => (
-                  <ListRow
-                    key={s.id}
-                    title={`${KIND_EMOJI[s.kind]} ${s.planTitle}`}
-                    sub={`${formatDateShort(s.date)} · 完成 ${Math.round(s.completionRate * 100)}% · ${s.totalSets} 组 · ${formatDurationCN(s.totalDurationSec)}`}
-                    value={formatVolume(s.totalVolumeKg)}
-                    onClick={() => setDetail(s)}
-                  />
-                ))}
+            <div className="report-body">
+              {detailReport.summaryText && (
+                <>
+                  <div className="strong" style={{ marginTop: 14 }}>
+                    报告摘要
+                  </div>
+                  <p className="small">{detailReport.summaryText}</p>
+                </>
+              )}
+              {detailReport.evaluation && (
+                <>
+                  <div className="strong" style={{ marginTop: 12 }}>
+                    ChatGPT 的评价
+                  </div>
+                  <p className="small">{detailReport.evaluation}</p>
+                </>
+              )}
+              {detailReport.suggestions && (
+                <>
+                  <div className="strong" style={{ marginTop: 12 }}>
+                    建议
+                  </div>
+                  <p className="small">{detailReport.suggestions}</p>
+                </>
+              )}
+              {detailReport.risks && (
+                <>
+                  <div className="strong" style={{ marginTop: 12 }}>
+                    风险提醒
+                  </div>
+                  <p className="small" style={{ color: 'var(--orange)' }}>
+                    {detailReport.risks}
+                  </p>
+                </>
+              )}
+              <div className="strong" style={{ marginTop: 12 }}>
+                完整报告
               </div>
-              <div className="tiny muted center">点开任意一条可以查看详情并导出中文 PDF</div>
-            </>
-          )}
-        </div>
-      )}
+              <p className="small" style={{ whiteSpace: 'pre-wrap' }}>
+                {detailReport.bodyText}
+              </p>
+              {detailReport.note && (
+                <>
+                  <div className="strong" style={{ marginTop: 12 }}>
+                    我的备注
+                  </div>
+                  <p className="small">{detailReport.note}</p>
+                </>
+              )}
+            </div>
 
-      {tab === 'import' && (
-        <div style={{ marginTop: 14 }}>
-          <Card>
-            <div className="strong" style={{ fontSize: 16 }}>
-              导入 ChatGPT PDF
-            </div>
-            <div className="tiny muted" style={{ marginTop: 4, marginBottom: 12 }}>
-              支持健身计划、今日训练总结、周训练计划、身体数据报告。文字型 PDF 在本机解析；
-              扫描版 PDF 会提示需要 OCR，不会假装识别成功。
-            </div>
-            <PdfImportButton variant="primary" block size="lg" label="选择 PDF 文件" testId="import-pdf-summary" />
-            <div style={{ marginTop: 10 }}>
-              <PdfDropZone label="拖拽 PDF 到此处导入" compact />
-            </div>
-          </Card>
-
-          <SectionTitle>最近的导入</SectionTitle>
-          {pdfImports.length === 0 ? (
-            <Card>
-              <EmptyState emoji="📄" title="还没有导入记录" />
-            </Card>
-          ) : (
-            <div className="list">
-              {[...pdfImports]
-                .sort((a, b) => (a.importedAt < b.importedAt ? 1 : -1))
-                .slice(0, 20)
-                .map((r) => (
-                  <ListRow
-                    key={r.id}
-                    title={r.fileName}
-                    sub={`${formatDateShort(r.importedAt.slice(0, 10))} · ${PDF_KIND_LABEL[r.kind]} · ${
-                      r.ocrRequired ? '需要 OCR' : `${r.pageCount} 页`
-                    } → ${r.saved ? '已保存' : '未保存'}`}
-                    right={
-                      <button
-                        className="icon-btn"
-                        aria-label="删除导入记录"
-                        onClick={() => void deletePdfImport(r.id)}
-                      >
-                        <IconTrash width={18} height={18} />
-                      </button>
-                    }
-                  />
-                ))}
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* 报告详情 */}
-      <Sheet
-        open={detail != null}
-        onClose={() => setDetail(null)}
-        title={detail ? `${detail.planTitle}` : ''}
-        footer={
-          detail && (
-            <div className="col" style={{ gap: 10 }}>
+            <div className="col" style={{ gap: 10, marginTop: 14 }}>
               <Button
                 block
                 variant="primary"
                 size="lg"
-                disabled={exporting === detail.id}
-                onClick={() => void exportPdf(detail)}
+                data-testid="report-view-records"
+                onClick={() => {
+                  setRangeStart(detailReport.startDate);
+                  setRangeEnd(detailReport.endDate);
+                  setView('list');
+                  setTab('records');
+                  setDetailReport(null);
+                }}
               >
-                {exporting === detail.id ? '正在生成 PDF…' : '导出中文 PDF'}
+                查看该时间段的原始记录
               </Button>
-              <Button block size="lg" variant="danger" onClick={() => setConfirmDelete(detail)}>
-                删除这条记录
+              <Button
+                block
+                onClick={async () => {
+                  const blob = detailReport.pdfBlob ?? (await loadReportPdf(detailReport.id));
+                  if (!blob) {
+                    toast('没有保存原始 PDF', 'error');
+                    return;
+                  }
+                  const url = URL.createObjectURL(blob);
+                  const a = document.createElement('a');
+                  a.href = url;
+                  a.download = detailReport.fileName ?? `${detailReport.title}.pdf`;
+                  document.body.appendChild(a);
+                  a.click();
+                  a.remove();
+                  setTimeout(() => URL.revokeObjectURL(url), 4000);
+                }}
+              >
+                下载原始 PDF
+              </Button>
+              <Button
+                block
+                variant="danger"
+                data-testid="report-delete"
+                onClick={() => setConfirmTarget(`report:${detailReport.id}`)}
+              >
+                删除这份报告
               </Button>
             </div>
-          )
-        }
-      >
-        {detail && <SummaryDetail summary={detail} />}
+          </div>
+        )}
       </Sheet>
 
+      {/* ---------------- 确认删除 ---------------- */}
       <Confirm
-        open={confirmDelete != null}
-        title="删除这条训练记录？"
-        message="删除后无法恢复。"
+        open={confirmTarget !== null}
+        title="确认删除？"
+        message={
+          confirmTarget?.startsWith('report:')
+            ? `将删除分析报告「${detailReport?.title ?? ''}」，每日原始记录不受影响。`
+            : `将删除 ${confirmTarget ?? ''} 的今日总结记录，操作无法撤销。`
+        }
         confirmText="删除"
         danger
-        onCancel={() => setConfirmDelete(null)}
-        onConfirm={() => {
-          const id = confirmDelete?.id;
-          setConfirmDelete(null);
-          setDetail(null);
-          if (id) void deleteSummary(id).then(() => toast('记录已删除'));
+        onCancel={() => setConfirmTarget(null)}
+        onConfirm={async () => {
+          const target = confirmTarget;
+          setConfirmTarget(null);
+          if (!target) return;
+          if (target.startsWith('report:')) {
+            await deleteChatGptReport(target.slice('report:'.length));
+            setDetailReport(null);
+            toast('报告已删除', 'success');
+            return;
+          }
+          await deleteDailyLog(target as ISODate);
+          toast('记录已删除', 'success');
         }}
+      />
+
+      <ExportDialog
+        open={exportOpen}
+        onClose={() => setExportOpen(false)}
+        initialStart={exportRange.start}
+        initialEnd={exportRange.end}
       />
     </Page>
   );

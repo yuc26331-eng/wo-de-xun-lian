@@ -12,7 +12,7 @@ test.describe('五个主页面基本可用', () => {
     const tabs: { label: string; heading: string }[] = [
       { label: '训练', heading: '训练' },
       { label: '数据', heading: '数据' },
-      { label: '总结', heading: '总结' },
+      { label: '总结', heading: '今日总结' },
       { label: '我的', heading: '我的' },
     ];
 

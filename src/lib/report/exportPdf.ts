@@ -53,3 +53,102 @@ export async function exportPlanPdf(plan: TrainingPlan): Promise<void> {
 }
 
 export type { LiveSession, WorkoutSummary, TrainingPlan, BodyMetric, DailyLog };
+
+/* ------------------------------------------------------------------ */
+/* 「给 ChatGPT 分析」报告：PDF / Markdown / 纯文本 / JSON 四种格式      */
+/* ------------------------------------------------------------------ */
+
+import type {
+  AttachmentMeta,
+  BodyMetric as BodyMetricType,
+  DailyLog as DailyLogType,
+  ISODate,
+  WorkoutSummary as SummaryType,
+} from '../../types';
+import {
+  buildRangeData,
+  buildRangeSummary,
+  exportFileName,
+  toJson,
+  toMarkdown,
+  toPlainText,
+  type DayBundle,
+  type ExportContext,
+  type ExportInclude,
+  type RangeSummary,
+} from './chatgptExport';
+
+export type ReportFormat = 'pdf' | 'markdown' | 'text' | 'json';
+
+export interface ChatGptExportRequest {
+  start: ISODate;
+  end: ISODate;
+  include: ExportInclude;
+  context: ExportContext;
+}
+
+export interface ChatGptExportResult {
+  days: DayBundle[];
+  summary: RangeSummary;
+}
+
+/** 生成预览数据（不下载），供导出预览界面与导出动作共用 */
+export function prepareChatGptExport(req: ChatGptExportRequest): ChatGptExportResult {
+  const days = buildRangeData(req.start, req.end, req.context);
+  const summary = buildRangeSummary(days);
+  return { days, summary };
+}
+
+function downloadBlob(blob: Blob, fileName: string) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = fileName;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 5000);
+}
+
+/** 导出并下载；返回导出的文件名 */
+export async function exportChatGptReport(
+  req: ChatGptExportRequest,
+  format: ReportFormat,
+): Promise<string> {
+  const { days, summary } = prepareChatGptExport(req);
+
+  if (format === 'markdown') {
+    const name = exportFileName(req.start, req.end, 'md');
+    downloadBlob(new Blob([toMarkdown(days, summary, req.include)], { type: 'text/markdown' }), name);
+    return name;
+  }
+  if (format === 'text') {
+    const name = exportFileName(req.start, req.end, 'txt');
+    downloadBlob(
+      new Blob([toPlainText(days, summary, req.include)], { type: 'text/plain;charset=utf-8' }),
+      name,
+    );
+    return name;
+  }
+  if (format === 'json') {
+    const name = exportFileName(req.start, req.end, 'json');
+    downloadBlob(
+      new Blob([toJson(days, summary, req.include)], { type: 'application/json' }),
+      name,
+    );
+    return name;
+  }
+
+  // PDF：按需加载 pdf-lib 与中文字体
+  const [{ buildChatGptRangePdf, pdfFileName }, fonts] = await Promise.all([
+    import('./buildChatGptPdf'),
+    loadFonts(),
+  ]);
+  const bytes = await buildChatGptRangePdf({ days, include: req.include, summary }, fonts);
+  const name = pdfFileName(req.start, req.end);
+  downloadBlob(new Blob([bytes as unknown as BlobPart], { type: 'application/pdf' }), name);
+  return name;
+}
+
+export type { ExportContext, ExportInclude, DayBundle, RangeSummary };
+export type { AttachmentMeta, BodyMetricType, DailyLogType, SummaryType };

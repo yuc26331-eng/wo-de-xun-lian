@@ -76,9 +76,16 @@ import {
   skipExercise,
   startRest,
   undoSet,
+  updateSetRecord,
   type SessionResult,
 } from '../lib/session';
-import type { ExerciseProgress, LiveSession, TrainingPlan } from '../types';
+import type {
+  ExerciseProgress,
+  LiveSession,
+  SessionKind,
+  SetRecord,
+  TrainingPlan,
+} from '../types';
 import './live.css';
 
 interface EditorState {
@@ -146,6 +153,11 @@ export default function LiveWorkoutPage() {
   const [adjustReps, setAdjustReps] = useState('');
   const [adjustRest, setAdjustRest] = useState(90);
   const [noteDraft, setNoteDraft] = useState('');
+  const [editSet, setEditSet] = useState<SetRecord | null>(null);
+  const [editKind, setEditKind] = useState<SessionKind>('strength');
+  const [editOpen, setEditOpen] = useState(false);
+  const [editForm, setEditForm] = useState<EditorState>(EMPTY_EDITOR);
+  const [stashing, setStashing] = useState(false);
   const [finishForm, setFinishForm] = useState({
     weight: '',
     rpe: '',
@@ -407,6 +419,54 @@ export default function LiveWorkoutPage() {
     navigate('/');
   }, [navigate, setLiveSession, toast]);
 
+  /**
+   * 暂存训练：把当前进度（含已完成组、重量、次数、RPE、备注、休息状态）
+   * 原样保存在本机，下次打开可继续，不生成训练记录。
+   */
+  const onStash = useCallback(async () => {
+    const cur = sessionRef.current;
+    if (!cur || stashing) return;
+    setStashing(true);
+    try {
+      const next = cur.status === 'active' ? pauseSession(cur).session : cur;
+      await setLiveSession(next);
+      sessionRef.current = next;
+      setView(next);
+      setPauseOpen(false);
+      toast('已暂存训练，下次进入可继续', 'success');
+      navigate('/');
+    } catch (err) {
+      console.error('[live] 暂存失败', err);
+      toast('暂存失败，请重试', 'error');
+    } finally {
+      setStashing(false);
+    }
+  }, [navigate, setLiveSession, stashing, toast]);
+
+  /** 保存已完成组的修改（可改重量/次数/RPE/时长/距离/心率） */
+  const onSaveSetEdit = useCallback(() => {
+    if (!editSet) return;
+    const patch = kindIsCardio(editKind)
+      ? {
+          durationSec:
+            editForm.durationMin != null ? Math.round(editForm.durationMin * 60) : null,
+          distanceKm: editForm.distanceKm,
+          hrBpm: editForm.hrBpm,
+          rpe: editForm.rpe,
+        }
+      : {
+          weightKg: editForm.weightKg,
+          reps: editForm.reps,
+          rpe: editForm.rpe,
+        };
+    const res = mutate((s) => updateSetRecord(s, editSet.id, patch));
+    if (res?.changed) {
+      setEditOpen(false);
+      setEditSet(null);
+      toast('已保存这一组的修改', 'success');
+    }
+  }, [editForm, editKind, editSet, mutate, toast]);
+
   /* --------------------------------------------------------------- 渲染 */
   if (!ready) {
     return (
@@ -659,14 +719,35 @@ export default function LiveWorkoutPage() {
               </div>
               <div className="set-dots" style={{ marginTop: 10 }}>
                 {exercise.sets.map((s, i) => (
-                  <span
+                  <button
                     key={s.id}
+                    type="button"
                     className={`set-dot ${s.done ? 'done' : ''} ${
                       !s.done && s.id === pendingSet?.id ? 'current' : ''
                     }`}
+                    aria-label={
+                      s.done
+                        ? `已完成的第 ${i + 1} 组，点击可修改或取消完成`
+                        : `第 ${i + 1} 组`
+                    }
+                    data-testid={`set-dot-${i + 1}`}
+                    onClick={() => {
+                      if (!s.done) return;
+                      setEditSet(s);
+                      setEditKind(exercise.kind);
+                      setEditForm({
+                        weightKg: s.weightKg,
+                        reps: s.reps,
+                        rpe: s.rpe ?? null,
+                        durationMin: s.durationSec != null ? s.durationSec / 60 : null,
+                        distanceKm: s.distanceKm ?? null,
+                        hrBpm: s.hrBpm ?? null,
+                      });
+                      setEditOpen(true);
+                    }}
                   >
                     {s.done ? '✓' : i + 1}
-                  </span>
+                  </button>
                 ))}
               </div>
 
@@ -909,7 +990,31 @@ export default function LiveWorkoutPage() {
               data-testid="live-progress-done"
             >
               已完成 {progress.doneSets}/{progress.plannedSets} 组 · 剩余 {pendingCount} 个动作 ·
-              自动保存中
+              {` 已自动保存 ${new Date(view.updatedAt).toLocaleTimeString('zh-CN', {
+                hour: '2-digit',
+                minute: '2-digit',
+                second: '2-digit',
+              })}`}
+            </div>
+            <div className="row" style={{ gap: 10, marginTop: 10 }}>
+              <Button
+                block
+                size="lg"
+                disabled={stashing}
+                data-testid="live-stash"
+                onClick={() => void onStash()}
+              >
+                {stashing ? '暂存中…' : '暂存训练'}
+              </Button>
+              <Button
+                block
+                size="lg"
+                variant="ghost"
+                data-testid="live-finish-open"
+                onClick={() => setFinishOpen(true)}
+              >
+                保存并结束训练
+              </Button>
             </div>
           </div>
         </div>
@@ -942,6 +1047,94 @@ export default function LiveWorkoutPage() {
           <Field label="本动作备注（可选）">
             <TextArea value={noteDraft} onChange={setNoteDraft} rows={2} placeholder="例如：右膝有点紧，降低幅度" />
           </Field>
+        </div>
+      </Sheet>
+
+      {/* 已完成组编辑（可改数据或取消完成） */}
+      <Sheet
+        open={editOpen}
+        onClose={() => setEditOpen(false)}
+        title={`第 ${editSet?.index ?? 1} 组记录`}
+        footer={
+          <div className="col" style={{ gap: 10 }}>
+            <Button block variant="primary" size="lg" onClick={onSaveSetEdit} data-testid="set-edit-save">
+              保存修改
+            </Button>
+            <Button
+              block
+              variant="danger"
+              size="lg"
+              data-testid="set-edit-undo"
+              onClick={() => {
+                if (!editSet) return;
+                const res = mutate((s) => undoSet(s, editSet.id));
+                if (res?.changed) {
+                  toast('已取消完成这一组');
+                  setEditOpen(false);
+                  setEditSet(null);
+                }
+              }}
+            >
+              取消完成（这一组重新记录）
+            </Button>
+          </div>
+        }
+      >
+        <div className="col" style={{ gap: 12 }}>
+          {kindIsCardio(editKind) ? (
+            <>
+              <Field label="实际时长（分钟）">
+                <NumberInput
+                  value={editForm.durationMin}
+                  onChange={(v) => setEditForm((e) => ({ ...e, durationMin: v }))}
+                  testId="set-edit-duration"
+                />
+              </Field>
+              <Field label="实际距离（km）">
+                <NumberInput
+                  value={editForm.distanceKm}
+                  dec={2}
+                  onChange={(v) => setEditForm((e) => ({ ...e, distanceKm: v }))}
+                />
+              </Field>
+              <Field label="平均心率">
+                <NumberInput
+                  value={editForm.hrBpm}
+                  dec={0}
+                  onChange={(v) => setEditForm((e) => ({ ...e, hrBpm: v }))}
+                />
+              </Field>
+            </>
+          ) : (
+            <>
+              <Field label="实际重量（kg）">
+                <NumberInput
+                  value={editForm.weightKg}
+                  onChange={(v) => setEditForm((e) => ({ ...e, weightKg: v }))}
+                  testId="set-edit-weight"
+                />
+              </Field>
+              <Field label="实际次数">
+                <NumberInput
+                  value={editForm.reps}
+                  dec={0}
+                  onChange={(v) => setEditForm((e) => ({ ...e, reps: v }))}
+                  testId="set-edit-reps"
+                />
+              </Field>
+            </>
+          )}
+          <Field label="本组 RPE（1-10）">
+            <NumberInput
+              value={editForm.rpe}
+              dec={0}
+              onChange={(v) => setEditForm((e) => ({ ...e, rpe: v }))}
+              testId="set-edit-rpe"
+            />
+          </Field>
+          <div className="tiny muted">
+            修改与取消完成都会立即写入本机数据库，刷新或锁屏后依然保留。
+          </div>
         </div>
       </Sheet>
 
@@ -1013,7 +1206,16 @@ export default function LiveWorkoutPage() {
             }}
             data-testid="live-end-early"
           >
-            结束并保存
+            保存并结束训练
+          </Button>
+          <Button
+            block
+            size="lg"
+            disabled={stashing}
+            onClick={() => void onStash()}
+            data-testid="live-stash-paused"
+          >
+            {stashing ? '暂存中…' : '暂存训练（保留进度）'}
           </Button>
         </div>
       </Sheet>

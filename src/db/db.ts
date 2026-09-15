@@ -2,6 +2,7 @@ import { openDB, type DBSchema, type IDBPDatabase } from 'idb';
 import type {
   AppSettings,
   BodyMetric,
+  ChatGptReport,
   DailyLog,
   ExerciseDef,
   Goal,
@@ -9,12 +10,14 @@ import type {
   PdfImportRecord,
   PersonalRecord,
   PlanTemplate,
+  StoredAttachment,
   TrainingPlan,
   WorkoutSummary,
 } from '../types';
 
 export const DB_NAME = 'wo-de-xun-lian';
-export const DB_VERSION = 1;
+/** v2：新增「附件（截图）」「ChatGPT 分析报告」两个 store；旧数据自动保留 */
+export const DB_VERSION = 2;
 
 export interface StoreMap {
   plans: TrainingPlan;
@@ -28,6 +31,8 @@ export interface StoreMap {
   goals: Goal;
   settings: AppSettings;
   pdfImports: PdfImportRecord;
+  attachments: StoredAttachment;
+  chatGptReports: ChatGptReport;
 }
 
 export type StoreName = keyof StoreMap;
@@ -44,6 +49,8 @@ export const ALL_STORES: StoreName[] = [
   'goals',
   'settings',
   'pdfImports',
+  'attachments',
+  'chatGptReports',
 ];
 
 interface FitnessDB extends DBSchema {
@@ -58,6 +65,8 @@ interface FitnessDB extends DBSchema {
   goals: { key: string; value: Goal };
   settings: { key: string; value: AppSettings };
   pdfImports: { key: string; value: PdfImportRecord; indexes: { importedAt: string } };
+  attachments: { key: string; value: StoredAttachment; indexes: { date: string } };
+  chatGptReports: { key: string; value: ChatGptReport; indexes: { startDate: string } };
 }
 
 let dbPromise: Promise<IDBPDatabase<FitnessDB>> | null = null;
@@ -98,6 +107,16 @@ export function getDB(): Promise<IDBPDatabase<FitnessDB>> {
         }
         if (!db.objectStoreNames.contains('pdfImports')) {
           db.createObjectStore('pdfImports', { keyPath: 'id' }).createIndex('importedAt', 'importedAt');
+        }
+        // v2 新增：截图附件（Apple Watch / 睡眠）与 ChatGPT 分析报告
+        if (!db.objectStoreNames.contains('attachments')) {
+          db.createObjectStore('attachments', { keyPath: 'id' }).createIndex('date', 'date');
+        }
+        if (!db.objectStoreNames.contains('chatGptReports')) {
+          db.createObjectStore('chatGptReports', { keyPath: 'id' }).createIndex(
+            'startDate',
+            'startDate',
+          );
         }
       },
       blocked() {

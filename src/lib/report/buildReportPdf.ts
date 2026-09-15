@@ -90,7 +90,7 @@ export function sanitizeForPdf(input: string): string {
  */
 const EMBED_SUBSET = false;
 
-class Report {
+export class Report {
   doc!: PDFDocument;
   regular!: PDFFont;
   bold!: PDFFont;

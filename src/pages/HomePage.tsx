@@ -36,6 +36,7 @@ import {
   toISODate,
 } from '../lib/format';
 import { useAppData } from '../state/AppData';
+import { dailyProgress } from '../lib/summary/sections';
 import { SESSION_KIND_LABEL, type ISODate, type TrainingPlan, type WorkoutSummary } from '../types';
 
 /** 今日计划：优先今天，其次最近的未来计划，最后回退到最近一次计划 */
@@ -111,6 +112,7 @@ export default function HomePage() {
 
   const metric = useMemo(() => bodyMetrics.find((m) => m.date === today) ?? null, [bodyMetrics, today]);
   const todayLog = useMemo(() => dailyLogs.find((d) => d.date === today) ?? null, [dailyLogs, today]);
+  const summaryProgress = useMemo(() => dailyProgress(todayLog), [todayLog]);
   const plan = useMemo(() => pickTodayPlan(plans, today), [plans, today]);
   const latestWeight = useMemo(() => {
     const list = bodyMetrics
@@ -343,6 +345,39 @@ export default function HomePage() {
           </div>
         </div>
       </Card>
+
+      {/* 今日总结完成度 */}
+      <SectionTitle action="去填写" onAction={() => navigate('/summary')}>
+        今日总结
+      </SectionTitle>
+      <div data-testid="home-summary-progress">
+      <Card onClick={() => navigate('/summary')}>
+        <div className="row-between">
+          <div>
+            <div className="small muted">今日记录完成度</div>
+            <div className="strong" style={{ fontSize: 22 }}>
+              {Math.round(summaryProgress.ratio * 100)}%
+            </div>
+          </div>
+          <Chip tone={summaryProgress.ratio >= 0.6 ? 'green' : summaryProgress.hasAny ? 'orange' : 'default'}>
+            {summaryProgress.hasAny ? `${summaryProgress.filled}/${summaryProgress.total} 项` : '还没有记录'}
+          </Chip>
+        </div>
+        <div className="bar" style={{ marginTop: 10 }}>
+          <i style={{ width: `${Math.max(3, Math.round(summaryProgress.ratio * 100))}%` }} />
+        </div>
+        <div className="wrap" style={{ gap: 6, marginTop: 10 }}>
+          {summaryProgress.sections.map((s) => (
+            <Chip key={s.key} tone={s.filled > 0 ? 'accent' : 'default'}>
+              {s.emoji} {s.label.split(' ')[0]} {s.filled}/{s.total}
+            </Chip>
+          ))}
+        </div>
+        <div className="tiny muted" style={{ marginTop: 10 }}>
+          记录训练、Apple Watch、睡眠、身体与饮食数据，之后可以一键导出给 ChatGPT 分析。
+        </div>
+      </Card>
+      </div>
 
       {/* 数据速览 */}
       <SectionTitle action="全部数据" onAction={() => navigate('/data')}>

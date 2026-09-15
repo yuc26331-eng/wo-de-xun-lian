@@ -70,9 +70,13 @@ test.describe('实时跟练完整流程', () => {
     await expect(page).toHaveURL(/summary/, { timeout: 20_000 });
     await expect(page.getByText('今日总结').first()).toBeVisible({ timeout: 20_000 });
 
-    const download = page.waitForEvent('download', { timeout: 60_000 });
-    await page.getByRole('button', { name: /导出今日训练 PDF/ }).first().click();
+    // 新的导出入口：一键导出给 ChatGPT → PDF
+    await page.getByTestId('open-export').click();
+    await expect(page.getByRole('heading', { name: '一键导出给 ChatGPT' })).toBeVisible();
+    const download = page.waitForEvent('download', { timeout: 90_000 });
+    await page.getByTestId('export-pdf').click();
     const file = await download;
+    expect(file.suggestedFilename()).toMatch(/^训练与恢复记录_/);
     const filePath = await file.path();
     expect(filePath).toBeTruthy();
     const { size } = await import('node:fs').then((fs) => fs.promises.stat(filePath!));

@@ -10,6 +10,7 @@ import ProfilePage from './pages/ProfilePage';
 import HistoryPage from './pages/HistoryPage';
 import ImportConfirmPage from './pages/ImportConfirmPage';
 import LiveWorkoutPage from './pages/LiveWorkoutPage';
+import ChatGptReportImportPage from './pages/ChatGptReportImportPage';
 
 /** 主题：跟随系统 / 浅色 / 深色，并同步状态栏颜色 */
 function ThemeSync() {
@@ -44,6 +45,7 @@ export default function App() {
             <Route path="/me" element={<ProfilePage />} />
             <Route path="/live" element={<LiveWorkoutPage />} />
             <Route path="/import/confirm" element={<ImportConfirmPage />} />
+            <Route path="/import/chatgpt" element={<ChatGptReportImportPage />} />
             <Route path="/history" element={<HistoryPage />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>

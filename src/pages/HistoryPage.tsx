@@ -15,6 +15,8 @@ import {
   Segmented,
   Sheet,
   Stat,
+  Field,
+  TextArea,
   TextInput,
   useToast,
 } from '../components/ui';
@@ -22,10 +24,13 @@ import { IconShare, IconTrash } from '../components/icons';
 import { exportSummaryPdf } from '../lib/report/exportPdf';
 import {
   KIND_EMOJI,
+  addDays,
+  formatDateCN,
   formatDateShort,
   formatDurationCN,
   formatNumber,
   formatVolume,
+  toISODate,
 } from '../lib/format';
 import { useAppData } from '../state/AppData';
 import { SESSION_KIND_LABEL, type SessionKind, type WorkoutSummary } from '../types';
@@ -38,12 +43,38 @@ function monthLabel(date: string): string {
 
 export default function HistoryPage() {
   const toast = useToast();
-  const { ready, summaries, plans, bodyMetrics, dailyLogs, deleteSummary } = useAppData();
+  const {
+    ready,
+    summaries,
+    plans,
+    bodyMetrics,
+    dailyLogs,
+    deleteSummary,
+    saveSummary,
+    duplicateSummary,
+    renameSummary,
+  } = useAppData();
   const [filter, setFilter] = useState<Filter>('all');
   const [query, setQuery] = useState('');
   const [detail, setDetail] = useState<WorkoutSummary | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<WorkoutSummary | null>(null);
   const [exporting, setExporting] = useState<string | null>(null);
+  const [editOpen, setEditOpen] = useState(false);
+  const [editForm, setEditForm] = useState({
+    title: '',
+    durationMin: '',
+    volume: '',
+    sets: '',
+    reps: '',
+    rpe: '',
+    fatigue: '',
+    feeling: '',
+    note: '',
+  });
+  const [copyOpen, setCopyOpen] = useState(false);
+  const [copyDate, setCopyDate] = useState(toISODate());
+  const [renameOpen, setRenameOpen] = useState(false);
+  const [renameValue, setRenameValue] = useState('');
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -173,6 +204,51 @@ export default function HistoryPage() {
                 <IconShare width={18} height={18} style={{ marginRight: 6 }} />
                 {exporting === detail.id ? '正在生成 PDF…' : '导出中文 PDF'}
               </Button>
+              <Button
+                block
+                size="lg"
+                data-testid="record-edit-open"
+                onClick={() => {
+                  setEditForm({
+                    title: detail.planTitle,
+                    durationMin: String(Math.round(detail.totalDurationSec / 60)),
+                    volume: String(Math.round(detail.totalVolumeKg)),
+                    sets: String(detail.totalSets),
+                    reps: String(detail.totalReps),
+                    rpe: detail.rpe != null ? String(detail.rpe) : '',
+                    fatigue: detail.fatigue != null ? String(detail.fatigue) : '',
+                    feeling: detail.feeling ?? '',
+                    note: detail.note ?? '',
+                  });
+                  setEditOpen(true);
+                }}
+              >
+                编辑这条记录
+              </Button>
+              <div className="row" style={{ gap: 10 }}>
+                <Button
+                  block
+                  size="lg"
+                  data-testid="record-rename-open"
+                  onClick={() => {
+                    setRenameValue(detail.planTitle);
+                    setRenameOpen(true);
+                  }}
+                >
+                  重命名
+                </Button>
+                <Button
+                  block
+                  size="lg"
+                  data-testid="record-copy-open"
+                  onClick={() => {
+                    setCopyDate(addDays(detail.date, 1));
+                    setCopyOpen(true);
+                  }}
+                >
+                  复制到其他日期
+                </Button>
+              </div>
               <Button block size="lg" variant="danger" onClick={() => setConfirmDelete(detail)}>
                 <IconTrash width={18} height={18} style={{ marginRight: 6 }} />
                 删除这条记录
@@ -268,10 +344,204 @@ export default function HistoryPage() {
         )}
       </Sheet>
 
+      {/* 编辑训练记录 */}
+      <Sheet
+        open={editOpen}
+        onClose={() => setEditOpen(false)}
+        title="编辑训练记录"
+        footer={
+          <Button
+            block
+            variant="primary"
+            size="lg"
+            data-testid="record-edit-save"
+            onClick={async () => {
+              if (!detail) return;
+              const next: WorkoutSummary = {
+                ...detail,
+                planTitle: editForm.title.trim() || detail.planTitle,
+                totalDurationSec: Math.max(
+                  0,
+                  Math.round((Number(editForm.durationMin) || 0) * 60),
+                ),
+                totalVolumeKg: Number(editForm.volume) || 0,
+                totalSets: Number(editForm.sets) || 0,
+                totalReps: Number(editForm.reps) || 0,
+                rpe: editForm.rpe ? Number(editForm.rpe) : null,
+                fatigue: editForm.fatigue ? Number(editForm.fatigue) : null,
+                feeling: editForm.feeling.trim() || undefined,
+                note: editForm.note.trim() || undefined,
+              };
+              await saveSummary(next);
+              setDetail(next);
+              setEditOpen(false);
+              toast('记录已更新', 'success');
+            }}
+          >
+            保存修改
+          </Button>
+        }
+      >
+        <div className="col" style={{ gap: 12 }}>
+          <Field label="训练名称">
+            <TextInput
+              value={editForm.title}
+              onChange={(v) => setEditForm((f) => ({ ...f, title: v }))}
+              testId="record-edit-title"
+            />
+          </Field>
+          <div className="form-row">
+            <div className="grow">
+              <Field label="时长（分钟）">
+                <TextInput
+                  value={editForm.durationMin}
+                  onChange={(v) => setEditForm((f) => ({ ...f, durationMin: v }))}
+                  inputMode="numeric"
+                />
+              </Field>
+            </div>
+            <div className="grow">
+              <Field label="总容量（kg）">
+                <TextInput
+                  value={editForm.volume}
+                  onChange={(v) => setEditForm((f) => ({ ...f, volume: v }))}
+                  inputMode="numeric"
+                />
+              </Field>
+            </div>
+          </div>
+          <div className="form-row">
+            <div className="grow">
+              <Field label="总组数">
+                <TextInput
+                  value={editForm.sets}
+                  onChange={(v) => setEditForm((f) => ({ ...f, sets: v }))}
+                  inputMode="numeric"
+                />
+              </Field>
+            </div>
+            <div className="grow">
+              <Field label="总次数">
+                <TextInput
+                  value={editForm.reps}
+                  onChange={(v) => setEditForm((f) => ({ ...f, reps: v }))}
+                  inputMode="numeric"
+                />
+              </Field>
+            </div>
+            <div className="grow">
+              <Field label="RPE">
+                <TextInput
+                  value={editForm.rpe}
+                  onChange={(v) => setEditForm((f) => ({ ...f, rpe: v }))}
+                  inputMode="numeric"
+                />
+              </Field>
+            </div>
+            <div className="grow">
+              <Field label="疲劳 1-5">
+                <TextInput
+                  value={editForm.fatigue}
+                  onChange={(v) => setEditForm((f) => ({ ...f, fatigue: v }))}
+                  inputMode="numeric"
+                />
+              </Field>
+            </div>
+          </div>
+          <Field label="训练感受">
+            <TextArea
+              value={editForm.feeling}
+              onChange={(v) => setEditForm((f) => ({ ...f, feeling: v }))}
+              rows={2}
+            />
+          </Field>
+          <Field label="备注">
+            <TextArea
+              value={editForm.note}
+              onChange={(v) => setEditForm((f) => ({ ...f, note: v }))}
+              rows={2}
+            />
+          </Field>
+        </div>
+      </Sheet>
+
+      {/* 重命名记录 */}
+      <Sheet
+        open={renameOpen}
+        onClose={() => setRenameOpen(false)}
+        title="重命名这条记录"
+        footer={
+          <Button
+            block
+            variant="primary"
+            size="lg"
+            data-testid="record-rename-save"
+            onClick={async () => {
+              if (!detail) return;
+              await renameSummary(detail.id, renameValue);
+              setDetail({ ...detail, planTitle: renameValue.trim() || detail.planTitle });
+              setRenameOpen(false);
+              toast('已重命名', 'success');
+            }}
+          >
+            保存名称
+          </Button>
+        }
+      >
+        <Field label="记录名称">
+          <TextInput
+            value={renameValue}
+            onChange={setRenameValue}
+            testId="record-rename-input"
+          />
+        </Field>
+      </Sheet>
+
+      {/* 复制记录到其他日期 */}
+      <Sheet
+        open={copyOpen}
+        onClose={() => setCopyOpen(false)}
+        title="复制到其他日期"
+        footer={
+          <Button
+            block
+            variant="primary"
+            size="lg"
+            data-testid="record-copy-save"
+            onClick={async () => {
+              if (!detail) return;
+              const created = await duplicateSummary(detail.id, copyDate);
+              setCopyOpen(false);
+              setDetail(null);
+              toast(created ? `已复制到 ${copyDate}` : '复制失败', created ? 'success' : 'error');
+            }}
+          >
+            确认复制
+          </Button>
+        }
+      >
+        <Field label="目标日期">
+          <input
+            className="input"
+            type="date"
+            value={copyDate}
+            data-testid="record-copy-date"
+            onChange={(e) => setCopyDate(e.target.value)}
+          />
+        </Field>
+        <div className="tiny muted" style={{ marginTop: 8 }}>
+          会生成一条新的训练记录，原始记录保持不变。
+        </div>
+      </Sheet>
+
       <Confirm
         open={confirmDelete != null}
         title="删除这条训练记录？"
-        message="删除后无法恢复，统计数据会同步更新。"
+        message={
+          confirmDelete
+            ? `将删除「${confirmDelete.planTitle}」（${formatDateCN(confirmDelete.date)}）的训练记录，删除后无法恢复，统计数据会同步更新。`
+            : ''
+        }
         confirmText="删除"
         danger
         onCancel={() => setConfirmDelete(null)}

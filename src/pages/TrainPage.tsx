@@ -30,6 +30,7 @@ import {
   KIND_EMOJI,
   addDays,
   formatDateShort,
+  formatDateCN,
   formatVolume,
   nowISO,
   targetSummary,
@@ -304,6 +305,7 @@ export default function TrainPage() {
     duplicatePlan,
     savePlanAsTemplate,
     togglePlanArchive,
+    renamePlan,
     saveExercise,
     deleteExercise,
     deleteTemplate,
@@ -316,6 +318,10 @@ export default function TrainPage() {
   const [confirmDelete, setConfirmDelete] = useState<TrainingPlan | null>(null);
   const [templateOpen, setTemplateOpen] = useState(false);
   const [templateName, setTemplateName] = useState('');
+  const [renameOpen, setRenameOpen] = useState(false);
+  const [renameValue, setRenameValue] = useState('');
+  const [copyOpen, setCopyOpen] = useState(false);
+  const [copyDate, setCopyDate] = useState(today);
   const [libraryQuery, setLibraryQuery] = useState('');
   const [libraryKind, setLibraryKind] = useState<SessionKind | 'all'>('all');
   const [newExerciseOpen, setNewExerciseOpen] = useState(false);
@@ -706,13 +712,23 @@ export default function TrainPage() {
             </Button>
             <Button
               block
-              onClick={() =>
-                void duplicatePlan(actionsPlan.id, addDays(actionsPlan.date ?? today, 1)).then(() =>
-                  toast('已复制到明天', 'success'),
-                )
-              }
+              data-testid="plan-rename"
+              onClick={() => {
+                setRenameValue(actionsPlan.title);
+                setRenameOpen(true);
+              }}
             >
-              复制到明天
+              重命名
+            </Button>
+            <Button
+              block
+              data-testid="plan-copy"
+              onClick={() => {
+                setCopyDate(addDays(actionsPlan.date ?? today, 1));
+                setCopyOpen(true);
+              }}
+            >
+              复制到其他日期
             </Button>
             <Button
               block
@@ -733,7 +749,13 @@ export default function TrainPage() {
       <Confirm
         open={confirmDelete != null}
         title="删除这个计划？"
-        message="删除后无法恢复，已完成的训练记录不会被删除。"
+        message={
+          confirmDelete
+            ? `将删除「${confirmDelete.title}」（${
+                confirmDelete.date ? formatDateCN(confirmDelete.date) : '未设置日期'
+              }）。删除后无法恢复，已完成的训练记录不会被删除。`
+            : ''
+        }
         confirmText="删除"
         danger
         onCancel={() => setConfirmDelete(null)}
@@ -744,6 +766,71 @@ export default function TrainPage() {
           if (id) void deletePlan(id).then(() => toast('计划已删除'));
         }}
       />
+
+      {/* 重命名计划 */}
+      <Sheet
+        open={renameOpen}
+        onClose={() => setRenameOpen(false)}
+        title="重命名训练计划"
+        footer={
+          <Button
+            block
+            variant="primary"
+            size="lg"
+            data-testid="plan-rename-save"
+            onClick={async () => {
+              if (!actionsPlan) return;
+              await renamePlan(actionsPlan.id, renameValue);
+              setActionsPlan({ ...actionsPlan, title: renameValue.trim() || actionsPlan.title });
+              setRenameOpen(false);
+              toast('已重命名', 'success');
+            }}
+          >
+            保存名称
+          </Button>
+        }
+      >
+        <Field label="计划名称">
+          <TextInput value={renameValue} onChange={setRenameValue} testId="plan-rename-input" />
+        </Field>
+      </Sheet>
+
+      {/* 复制计划到指定日期 */}
+      <Sheet
+        open={copyOpen}
+        onClose={() => setCopyOpen(false)}
+        title="复制到其他日期"
+        footer={
+          <Button
+            block
+            variant="primary"
+            size="lg"
+            data-testid="plan-copy-save"
+            onClick={async () => {
+              if (!actionsPlan) return;
+              await duplicatePlan(actionsPlan.id, copyDate);
+              setCopyOpen(false);
+              setActionsPlan(null);
+              toast(`已复制到 ${copyDate}`, 'success');
+            }}
+          >
+            确认复制
+          </Button>
+        }
+      >
+        <Field label="目标日期">
+          <input
+            className="input"
+            type="date"
+            value={copyDate}
+            data-testid="plan-copy-date"
+            onChange={(e) => setCopyDate(e.target.value)}
+          />
+        </Field>
+        <div className="tiny muted" style={{ marginTop: 8 }}>
+          复制会生成一份新的计划（含全部动作与热身），不会覆盖原有计划。
+        </div>
+      </Sheet>
 
       {/* 存为模板 */}
       <Sheet

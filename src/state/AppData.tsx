@@ -12,6 +12,7 @@ import {
   ALL_STORES,
   dbClearAll,
   dbDelete,
+  dbGet,
   dbGetAll,
   dbPut,
   dbPutMany,
@@ -29,8 +30,10 @@ import {
 import { nowISO, toISODate, uid } from '../lib/format';
 import type {
   AppSettings,
+  AttachmentMeta,
   BackupFile,
   BodyMetric,
+  ChatGptReport,
   DailyLog,
   ExerciseDef,
   Goal,
@@ -40,6 +43,7 @@ import type {
   PersonalRecord,
   PlanDraft,
   PlanTemplate,
+  StoredAttachment,
   TrainingPlan,
   WorkoutSummary,
 } from '../types';
@@ -73,6 +77,9 @@ export interface AppDataValue {
   pdfImports: PdfImportRecord[];
   settings: AppSettings;
   liveSession: LiveSession | null;
+  /** 截图附件（内存中只保留元数据，二进制按需从 IndexedDB 读取） */
+  attachments: AttachmentMeta[];
+  chatGptReports: ChatGptReport[];
 
   savePlan: (plan: TrainingPlan) => Promise<TrainingPlan>;
   createPlanFromDraft: (draft: PlanDraft) => Promise<TrainingPlan>;
@@ -80,13 +87,27 @@ export interface AppDataValue {
   duplicatePlan: (id: string, date?: ISODate) => Promise<TrainingPlan | null>;
   savePlanAsTemplate: (planId: string, name: string) => Promise<PlanTemplate | null>;
   togglePlanArchive: (id: string) => Promise<void>;
+  renamePlan: (id: string, title: string) => Promise<void>;
 
   saveSummary: (summary: WorkoutSummary) => Promise<void>;
   deleteSummary: (id: string) => Promise<void>;
+  duplicateSummary: (id: string, date: ISODate) => Promise<WorkoutSummary | null>;
+  renameSummary: (id: string, title: string) => Promise<void>;
 
   saveBodyMetric: (patch: Partial<BodyMetric> & { date: ISODate }) => Promise<BodyMetric>;
   deleteBodyMetric: (id: string) => Promise<void>;
   saveDailyLog: (patch: Partial<DailyLog> & { date: ISODate }) => Promise<DailyLog>;
+  deleteDailyLog: (date: ISODate) => Promise<void>;
+  copyDailyLog: (from: ISODate, to: ISODate) => Promise<DailyLog>;
+
+  saveAttachment: (meta: AttachmentMeta, blob: Blob) => Promise<void>;
+  deleteAttachment: (id: string) => Promise<void>;
+  loadAttachment: (id: string) => Promise<Blob | null>;
+
+  saveChatGptReport: (report: ChatGptReport) => Promise<ChatGptReport>;
+  deleteChatGptReport: (id: string) => Promise<void>;
+  renameChatGptReport: (id: string, title: string) => Promise<void>;
+  loadReportPdf: (id: string) => Promise<Blob | null>;
 
   saveExercise: (exercise: ExerciseDef) => Promise<void>;
   deleteExercise: (id: string) => Promise<void>;
@@ -105,6 +126,7 @@ export interface AppDataValue {
   saveSettings: (patch: Partial<AppSettings>) => Promise<void>;
 
   buildBackup: () => BackupFile;
+  buildFullBackup: () => Promise<Blob>;
   restoreBackup: (file: BackupFile) => Promise<void>;
   clearAllData: () => Promise<void>;
   restoreSamples: () => Promise<void>;
@@ -129,6 +151,8 @@ async function bootstrap(): Promise<{
   prs: PersonalRecord[];
   goals: Goal[];
   pdfImports: PdfImportRecord[];
+  attachments: AttachmentMeta[];
+  chatGptReports: ChatGptReport[];
   settings: AppSettings;
   liveSession: LiveSession | null;
 }> {
@@ -145,6 +169,11 @@ async function bootstrap(): Promise<{
       dbGetAll('goals'),
       dbGetAll('pdfImports'),
     ]);
+
+  // 附件只把元数据放进内存，二进制留在 IndexedDB（blob 是引用，不会整体复制）
+  const storedAttachments = await dbGetAll('attachments');
+  const attachments: AttachmentMeta[] = storedAttachments.map(({ blob: _blob, ...meta }) => meta);
+  const chatGptReports = await dbGetAll('chatGptReports');
 
   const settingsRows = await dbGetAll('settings');
   const settings = settingsRows[0] ?? DEFAULT_SETTINGS;
@@ -184,6 +213,8 @@ async function bootstrap(): Promise<{
     prs,
     goals,
     pdfImports,
+    attachments,
+    chatGptReports,
     settings: { ...DEFAULT_SETTINGS, ...settings },
     liveSession,
   };
@@ -201,6 +232,8 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
   const [prs, setPrs] = useState<PersonalRecord[]>([]);
   const [goals, setGoals] = useState<Goal[]>([]);
   const [pdfImports, setPdfImports] = useState<PdfImportRecord[]>([]);
+  const [attachments, setAttachments] = useState<AttachmentMeta[]>([]);
+  const [chatGptReports, setChatGptReports] = useState<ChatGptReport[]>([]);
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
   const [liveSession, setLiveSessionState] = useState<LiveSession | null>(null);
   const booted = useRef(false);
@@ -216,6 +249,8 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
     setPrs(data.prs);
     setGoals(data.goals);
     setPdfImports(data.pdfImports);
+    setAttachments(data.attachments);
+    setChatGptReports(data.chatGptReports);
     setSettings(data.settings);
     setLiveSessionState(data.liveSession);
   }, []);
@@ -338,6 +373,38 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
     setSummaries((prev) => prev.filter((s) => s.id !== id));
   }, []);
 
+  /** 复制一条训练记录到另一个日期（同一天已存在时覆盖该条记录） */
+  const duplicateSummary = useCallback(
+    async (id: string, date: ISODate) => {
+      const src = summaries.find((s) => s.id === id);
+      if (!src) return null;
+      const now = nowISO();
+      const copy: WorkoutSummary = {
+        ...src,
+        id: uid('sum'),
+        date,
+        createdAt: now,
+        startedAt: `${date}T${(src.startedAt || '').slice(11, 19) || '00:00:00'}`,
+        endedAt: `${date}T${(src.endedAt || '').slice(11, 19) || '00:00:00'}`,
+      };
+      await dbPut('summaries', copy);
+      setSummaries((prev) => [...prev, copy]);
+      return copy;
+    },
+    [summaries],
+  );
+
+  const renameSummary = useCallback(
+    async (id: string, title: string) => {
+      const src = summaries.find((s) => s.id === id);
+      if (!src) return;
+      const next = { ...src, planTitle: title.trim() || src.planTitle };
+      await dbPut('summaries', next);
+      setSummaries((prev) => prev.map((s) => (s.id === id ? next : s)));
+    },
+    [summaries],
+  );
+
   const saveBodyMetric = useCallback(async (patch: Partial<BodyMetric> & { date: ISODate }) => {
     const id = patch.date;
     const existing = await getDB().then((db) => db.get('bodyMetrics', id));
@@ -384,6 +451,98 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
     });
     return next;
   }, []);
+
+  const deleteDailyLog = useCallback(async (date: ISODate) => {
+    await dbDelete('dailyLogs', date);
+    setDailyLogs((prev) => prev.filter((d) => d.date !== date));
+  }, []);
+
+  /** 把某一天的记录复制到另一天（同一天已有记录时合并覆盖，不产生重复条目） */
+  const copyDailyLog = useCallback(
+    async (from: ISODate, to: ISODate) => {
+      const src = dailyLogs.find((d) => d.date === from);
+      if (!src) throw new Error('源日期没有记录');
+      const existing = dailyLogs.find((d) => d.date === to);
+      const now = nowISO();
+      const next: DailyLog = {
+        ...src,
+        ...existing,
+        id: to,
+        date: to,
+        createdAt: existing?.createdAt ?? now,
+        updatedAt: now,
+        attachmentIds: existing?.attachmentIds ?? [],
+      };
+      await dbPut('dailyLogs', next);
+      setDailyLogs((prev) => {
+        const exists = prev.some((d) => d.date === to);
+        return exists ? prev.map((d) => (d.date === to ? next : d)) : [...prev, next];
+      });
+      return next;
+    },
+    [dailyLogs],
+  );
+
+  /* ------------------------- 截图附件 ------------------------- */
+
+  const saveAttachment = useCallback(async (meta: AttachmentMeta, blob: Blob) => {
+    const record: StoredAttachment = { ...meta, blob };
+    await dbPut('attachments', record);
+    setAttachments((prev) => {
+      const exists = prev.some((a) => a.id === meta.id);
+      return exists ? prev.map((a) => (a.id === meta.id ? meta : a)) : [...prev, meta];
+    });
+  }, []);
+
+  const deleteAttachment = useCallback(async (id: string) => {
+    await dbDelete('attachments', id);
+    setAttachments((prev) => prev.filter((a) => a.id !== id));
+  }, []);
+
+  const loadAttachment = useCallback(async (id: string) => {
+    const row = await dbGet('attachments', id);
+    return row?.blob ?? null;
+  }, []);
+
+  /* --------------------- ChatGPT 分析报告 --------------------- */
+
+  const saveChatGptReport = useCallback(async (report: ChatGptReport) => {
+    const next = { ...report, updatedAt: nowISO() };
+    await dbPut('chatGptReports', next);
+    setChatGptReports((prev) => {
+      const exists = prev.some((r) => r.id === next.id);
+      return exists ? prev.map((r) => (r.id === next.id ? next : r)) : [...prev, next];
+    });
+    return next;
+  }, []);
+
+  const deleteChatGptReport = useCallback(async (id: string) => {
+    await dbDelete('chatGptReports', id);
+    setChatGptReports((prev) => prev.filter((r) => r.id !== id));
+  }, []);
+
+  const renameChatGptReport = useCallback(
+    async (id: string, title: string) => {
+      const src = chatGptReports.find((r) => r.id === id);
+      if (!src) return;
+      await saveChatGptReport({ ...src, title: title.trim() || src.title });
+    },
+    [chatGptReports, saveChatGptReport],
+  );
+
+  const loadReportPdf = useCallback(async (id: string) => {
+    const row = await dbGet('chatGptReports', id);
+    return row?.pdfBlob ?? null;
+  }, []);
+
+  const renamePlan = useCallback(
+    async (id: string, title: string) => {
+      const plan = plans.find((p) => p.id === id);
+      if (!plan) return;
+      await savePlan({ ...plan, title: title.trim() || plan.title });
+    },
+    [plans, savePlan],
+  );
 
   const saveExercise = useCallback(async (exercise: ExerciseDef) => {
     await dbPut('exercises', exercise);
@@ -493,10 +652,14 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
         settings,
         liveSession,
         pdfImports,
+        chatGptReports: chatGptReports.map((r) => ({ ...r, pdfBlob: undefined })),
+        attachments,
       },
     };
   }, [
+    attachments,
     bodyMetrics,
+    chatGptReports,
     dailyLogs,
     exercises,
     goals,
@@ -508,6 +671,38 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
     summaries,
     templates,
   ]);
+
+  /** 完整备份（含截图与 ChatGPT 原始 PDF，二进制转 base64 一并导出） */
+  const buildFullBackup = useCallback(async () => {
+    const base = buildBackup();
+    const toDataUrl = (blob: Blob) =>
+      new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result));
+        reader.onerror = () => reject(reader.error);
+        reader.readAsDataURL(blob);
+      });
+
+    const storedAttachments = await dbGetAll('attachments');
+    const attachmentFiles = await Promise.all(
+      storedAttachments.map(async (a) => ({
+        meta: { ...a, blob: undefined } as unknown as AttachmentMeta,
+        dataUrl: await toDataUrl(a.blob),
+      })),
+    );
+    const reports = await dbGetAll('chatGptReports');
+    const reportPdfs = await Promise.all(
+      reports
+        .filter((r) => r.pdfBlob)
+        .map(async (r) => ({
+          id: r.id,
+          fileName: r.fileName ?? 'report.pdf',
+          dataUrl: await toDataUrl(r.pdfBlob as Blob),
+        })),
+    );
+    const payload = { ...base, attachmentFiles, reportPdfs };
+    return new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+  }, [buildBackup]);
 
   const restoreBackup = useCallback(
     async (file: BackupFile) => {
@@ -524,6 +719,31 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
       await dbPutMany('prs', d.prs ?? []);
       await dbPutMany('goals', d.goals ?? []);
       await dbPutMany('pdfImports', d.pdfImports ?? []);
+      await dbPutMany('chatGptReports', d.chatGptReports ?? []);
+      // 附件二进制（来自完整备份）
+      const extras = file as unknown as {
+        attachmentFiles?: { meta: AttachmentMeta; dataUrl: string }[];
+        reportPdfs?: { id: string; dataUrl: string }[];
+      };
+      if (extras.attachmentFiles?.length) {
+        const rows: StoredAttachment[] = await Promise.all(
+          extras.attachmentFiles.map(async (item) => ({
+            ...item.meta,
+            blob: await fetch(item.dataUrl).then((r) => r.blob()),
+          })),
+        );
+        await dbPutMany('attachments', rows);
+      } else if (d.attachments?.length) {
+        // 只有元数据时保留元数据，缺附件不阻塞恢复
+        setAttachments(d.attachments);
+      }
+      for (const pdf of extras.reportPdfs ?? []) {
+        const existing = await dbGet('chatGptReports', pdf.id);
+        if (existing) {
+          const blob = await fetch(pdf.dataUrl).then((r) => r.blob());
+          await dbPut('chatGptReports', { ...existing, pdfBlob: blob });
+        }
+      }
       if (d.settings) await dbPut('settings', { ...DEFAULT_SETTINGS, ...d.settings });
       if (d.liveSession) await dbPut('sessions', d.liveSession);
       await load();
@@ -566,17 +786,31 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
       pdfImports,
       settings,
       liveSession,
+      attachments,
+      chatGptReports,
       savePlan,
       createPlanFromDraft,
       deletePlan,
       duplicatePlan,
       savePlanAsTemplate,
       togglePlanArchive,
+      renamePlan,
       saveSummary,
       deleteSummary,
+      duplicateSummary,
+      renameSummary,
       saveBodyMetric,
       deleteBodyMetric,
       saveDailyLog,
+      deleteDailyLog,
+      copyDailyLog,
+      saveAttachment,
+      deleteAttachment,
+      loadAttachment,
+      saveChatGptReport,
+      deleteChatGptReport,
+      renameChatGptReport,
+      loadReportPdf,
       saveExercise,
       deleteExercise,
       saveTemplate,
@@ -591,18 +825,26 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
       setLiveSession,
       saveSettings,
       buildBackup,
+      buildFullBackup,
       restoreBackup,
       clearAllData,
       restoreSamples,
       refresh: load,
     }),
     [
+      attachments,
       bodyMetrics,
       buildBackup,
+      buildFullBackup,
       clearAllData,
+      chatGptReports,
+      copyDailyLog,
       createPlanFromDraft,
       dailyLogs,
+      deleteAttachment,
       deleteBodyMetric,
+      deleteChatGptReport,
+      deleteDailyLog,
       deleteExercise,
       deleteGoal,
       deletePR,
@@ -610,18 +852,26 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
       deletePlan,
       deleteSummary,
       deleteTemplate,
+      duplicateSummary,
       duplicatePlan,
       exercises,
       goals,
       liveSession,
+      loadAttachment,
+      loadReportPdf,
       markPdfImportSaved,
       pdfImports,
       plans,
       prs,
       ready,
+      renameChatGptReport,
+      renamePlan,
+      renameSummary,
       restoreBackup,
       restoreSamples,
+      saveAttachment,
       saveBodyMetric,
+      saveChatGptReport,
       saveDailyLog,
       saveExercise,
       saveGoal,

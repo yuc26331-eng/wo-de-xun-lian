@@ -32,6 +32,7 @@ import {
   uid,
 } from '../lib/format';
 import { useAppData } from '../state/AppData';
+import { UpdatePanel } from '../components/UpdatePanel';
 import { PDF_KIND_LABEL, type BackupFile, type Goal, type ThemeMode } from '../types';
 
 type InstallPromptEvent = Event & { prompt: () => Promise<void>; userChoice?: Promise<unknown> };
@@ -72,7 +73,7 @@ export default function ProfilePage() {
     prs,
     pdfImports,
     deletePdfImport,
-    buildBackup,
+    buildFullBackup,
     restoreBackup,
     clearAllData,
     restoreSamples,
@@ -117,18 +118,23 @@ export default function ProfilePage() {
   }, [todayLog]);
 
   async function exportBackup() {
-    const backup = buildBackup();
-    const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `我的训练-备份-${today}.json`;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 4000);
-    await saveSettings({ lastBackupAt: nowISO() });
-    toast('备份已导出', 'success');
+    try {
+      // 完整备份：包含每日总结、ChatGPT 报告文本，以及截图与原始 PDF（base64）
+      const blob = await buildFullBackup();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `我的训练-完整备份-${today}.json`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 4000);
+      await saveSettings({ lastBackupAt: nowISO() });
+      toast('完整备份已导出（含截图与报告）', 'success');
+    } catch (err) {
+      console.error('[backup] 导出失败', err);
+      toast('备份导出失败，请重试', 'error');
+    }
   }
 
   async function onRestoreFile(file: File) {
@@ -324,6 +330,10 @@ export default function ProfilePage() {
           <span className="strong">{storage != null ? formatBytes(storage) : '计算中…'}</span>
         </div>
       </Card>
+
+      {/* 版本与更新 */}
+      <SectionTitle>版本与更新</SectionTitle>
+      <UpdatePanel />
 
       {/* PWA 安装 */}
       <SectionTitle>添加到手机主屏幕</SectionTitle>
