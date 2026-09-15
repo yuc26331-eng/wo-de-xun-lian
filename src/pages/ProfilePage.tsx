@@ -17,7 +17,6 @@ import {
   Segmented,
   Sheet,
   Stat,
-  Stepper,
   TextInput,
   useToast,
 } from '../components/ui';
@@ -33,8 +32,10 @@ import {
   uid,
 } from '../lib/format';
 import { useAppData } from '../state/AppData';
+import { useNavigate } from 'react-router-dom';
 import { currentVersion } from '../lib/update/updater';
 import { UpdatePanel } from '../components/UpdatePanel';
+import { CleanupSheet } from '../components/CleanupSheet';
 import { PDF_KIND_LABEL, type BackupFile, type Goal, type ThemeMode } from '../types';
 
 type InstallPromptEvent = Event & { prompt: () => Promise<void>; userChoice?: Promise<unknown> };
@@ -91,6 +92,7 @@ function formatBytes(bytes: number): string {
 
 export default function ProfilePage() {
   const toast = useToast();
+  const navigate = useNavigate();
   const {
     ready,
     settings,
@@ -99,7 +101,6 @@ export default function ProfilePage() {
     saveGoal,
     deleteGoal,
     dailyLogs,
-    saveDailyLog,
     bodyMetrics,
     summaries,
     plans,
@@ -123,9 +124,6 @@ export default function ProfilePage() {
   const [goalTarget, setGoalTarget] = useState<number | null>(null);
   const [goalUnit, setGoalUnit] = useState('kg');
   const [goalDeadline, setGoalDeadline] = useState('');
-  const [protein, setProtein] = useState<number>(todayLog?.supplements?.proteinG ?? 0);
-  const [scoops, setScoops] = useState<number>(todayLog?.supplements?.proteinScoops ?? 0);
-  const [creatine, setCreatine] = useState<number>(todayLog?.supplements?.creatineG ?? 0);
   const [storage, setStorage] = useState<number | null>(null);
   const [confirmClear, setConfirmClear] = useState(false);
   const [confirmSamples, setConfirmSamples] = useState(false);
@@ -134,6 +132,7 @@ export default function ProfilePage() {
   const [pendingRestore, setPendingRestore] = useState<PendingRestore | null>(null);
   const [restoreOpen, setRestoreOpen] = useState(false);
   const [restoring, setRestoring] = useState(false);
+  const [cleanupOpen, setCleanupOpen] = useState(false);
   const restoreInput = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -150,12 +149,6 @@ export default function ProfilePage() {
     if (!ready) return;
     void estimateStorageSize().then(setStorage);
   }, [ready, plans, summaries, bodyMetrics, dailyLogs, pdfImports]);
-
-  useEffect(() => {
-    setProtein(todayLog?.supplements?.proteinG ?? 0);
-    setScoops(todayLog?.supplements?.proteinScoops ?? 0);
-    setCreatine(todayLog?.supplements?.creatineG ?? 0);
-  }, [todayLog]);
 
   async function exportBackup() {
     try {
@@ -258,14 +251,6 @@ export default function ProfilePage() {
     toast('目标已添加', 'success');
   }
 
-  async function saveSupplements() {
-    await saveDailyLog({
-      date: today,
-      supplements: { proteinG: protein, proteinScoops: scoops, creatineG: creatine },
-    });
-    toast('补剂记录已保存', 'success');
-  }
-
   const openGoals = goals.filter((g) => !g.done);
   const doneGoals = goals.filter((g) => g.done);
 
@@ -317,35 +302,48 @@ export default function ProfilePage() {
         </div>
       )}
 
-      {/* 补剂 */}
+      {/* 补剂已移到「今日总结」的第 5 步，这里只做入口与概览 */}
       <SectionTitle>今日补剂</SectionTitle>
       <Card>
-        <div className="col" style={{ gap: 12 }}>
-          <div className="row-between">
-            <span className="strong">蛋白粉</span>
-            <div className="row" style={{ gap: 10 }}>
-              <Stepper value={scoops} min={0} max={10} onChange={setScoops} suffix="勺" />
+        <div className="row-between">
+          <div style={{ minWidth: 0 }}>
+            <div className="strong">
+              {todayLog?.noSupplements
+                ? '今天没吃补剂'
+                : todayLog?.supplementsList?.length ||
+                    todayLog?.supplements?.proteinG ||
+                    todayLog?.supplements?.creatineG
+                  ? [
+                      todayLog?.supplements?.proteinG
+                        ? `蛋白 ${todayLog.supplements.proteinG}g`
+                        : '',
+                      todayLog?.supplements?.creatineG
+                        ? `肌酸 ${todayLog.supplements.creatineG}g`
+                        : '',
+                      ...(todayLog?.supplementsList ?? []).map(
+                        (s) => `${s.name}${s.amount ? ` ${s.amount}${s.unit ?? ''}` : ''}`,
+                      ),
+                    ]
+                      .filter(Boolean)
+                      .join(' · ')
+                  : '还没有记录'
+              }
             </div>
-          </div>
-          <div className="row-between">
-            <span className="strong">蛋白质</span>
-            <div className="row" style={{ gap: 10 }}>
-              <Stepper value={protein} min={0} max={400} step={5} onChange={setProtein} suffix="g" />
+            <div className="tiny muted" style={{ marginTop: 4 }}>
+              补剂改为在「今日总结」里填写，和当天训练、睡眠放在一起
             </div>
-          </div>
-          <div className="row-between">
-            <span className="strong">肌酸</span>
-            <div className="row" style={{ gap: 10 }}>
-              <Stepper value={creatine} min={0} max={30} step={1} onChange={setCreatine} suffix="g" />
-            </div>
-          </div>
-          <Button block variant="primary" size="lg" onClick={() => void saveSupplements()}>
-            保存今日补剂
-          </Button>
-          <div className="tiny muted">
-            {formatDateCN(today)} · 常温水送服，肌酸每天 3-5g 即可，注意多喝水。
           </div>
         </div>
+        <Button
+          block
+          variant="primary"
+          size="lg"
+          style={{ marginTop: 12 }}
+          data-testid="go-supplements"
+          onClick={() => navigate('/summary?tab=today')}
+        >
+          去今日总结记录补剂
+        </Button>
       </Card>
 
       {/* 外观 */}
@@ -501,14 +499,26 @@ export default function ProfilePage() {
           <Button block size="lg" onClick={() => setConfirmSamples(true)}>
             重新载入示例数据
           </Button>
+          <Button
+            block
+            size="lg"
+            data-testid="cleanup-open"
+            onClick={() => setCleanupOpen(true)}
+          >
+            清空全部记录（保留目标）
+          </Button>
           <Button block size="lg" variant="danger" onClick={() => setConfirmClear(true)}>
             清空全部本地数据
           </Button>
           <div className="tiny muted">
             数据保存在浏览器的 IndexedDB 中。清理浏览器数据或卸载应用会导致数据丢失，建议定期导出备份。
+            「清空全部记录」只删除训练与每日记录（会先自动备份），不影响目标、动作库、模板、ChatGPT
+            报告与更新设置；「清空全部本地数据」会连同设置一起重置。
           </div>
         </div>
       </Card>
+
+      <CleanupSheet open={cleanupOpen} onClose={() => setCleanupOpen(false)} />
 
       {/* PDF 导入记录 */}
       <SectionTitle>PDF 导入记录</SectionTitle>

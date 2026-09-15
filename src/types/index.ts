@@ -377,6 +377,12 @@ export interface TrainingSection {
   /** 比赛或足球训练表现 */
   matchPerformance?: string;
   painSites?: string[];
+  /** 今天的训练次数（例如早晚各一次 = 2） */
+  sessionCount?: number | null;
+  /** 每次训练的时长（分钟） */
+  sessionDurationsMin?: number[];
+  /** 休息日：今天未训练 */
+  restDay?: boolean;
 }
 
 export type AttachmentKind = 'watch' | 'sleep' | 'other';
@@ -390,6 +396,20 @@ export interface AttachmentMeta {
   type: string;
   size: number;
   createdAt: ISODateTime;
+  /** OCR 原始文字（识别过的截图才有） */
+  ocrText?: string;
+  /** OCR 识别出的字段（保留下来便于重新展示与纠错） */
+  ocrFields?: Record<string, number | string | null>;
+  ocrStatus?: 'pending' | 'done' | 'failed';
+  ocrAt?: ISODateTime;
+}
+
+/** 自定义补剂记录 */
+export interface SupplementEntry {
+  id: string;
+  name: string;
+  amount?: number | null;
+  unit?: string;
 }
 
 /** IndexedDB 中真实存储的附件（含二进制内容） */
@@ -409,6 +429,18 @@ export interface DailyLog {
   freeNote?: string;
   attachmentIds?: string[];
   markedComplete?: boolean;
+  /** 引导式总结的进行状态：draft = 草稿（未归档），final = 已保存归档 */
+  status?: 'draft' | 'final';
+  /** 已完成的步骤 key */
+  completedSteps?: string[];
+  /** 上次停留的步骤 key（用于继续填写） */
+  lastStep?: string;
+  /** 自定义补剂（名称 / 用量 / 单位） */
+  supplementsList?: SupplementEntry[];
+  /** 今天没吃补剂 */
+  noSupplements?: boolean;
+  /** 归档时间（点击「保存今日总结」后写入） */
+  finalizedAt?: ISODateTime;
   /** —— v1 兼容字段（旧数据继续可用） —— */
   weightKg?: number | null;
   trainingContent?: string;
@@ -606,7 +638,14 @@ export interface AppSettings {
   unit: WeightUnit;
   defaultRestSec: number;
   bodyWeightGoalKg?: number | null;
+  /** 目标体脂率（%） */
+  bodyFatGoalPct?: number | null;
   weeklyFrequencyGoal?: number | null;
+  /** 一次性数据清理标记（避免重复清理） */
+  cleanupVersion?: number | null;
+  cleanupAt?: ISODateTime | null;
+  /** 示例数据是否已经播种过（清理后不再自动写回） */
+  samplesInitialized?: boolean;
   installPromptDismissed?: boolean;
   installPromptSeenAt?: ISODateTime | null;
   remindEnabled?: boolean;
@@ -635,4 +674,15 @@ export interface BackupFile {
     chatGptReports?: ChatGptReport[];
     attachments?: AttachmentMeta[];
   };
+}
+
+/** 清理前的自动备份留档（可随时导出） */
+export interface BackupSnapshot {
+  id: string;
+  createdAt: ISODateTime;
+  reason: string;
+  /** 备份 JSON 文本 */
+  payload: string;
+  /** 概要，便于展示 */
+  summary: Record<string, number>;
 }

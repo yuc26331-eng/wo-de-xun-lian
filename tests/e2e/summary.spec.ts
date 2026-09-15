@@ -6,6 +6,9 @@ test.describe('今日总结：六大分区与自动保存', () => {
     page,
   }) => {
     await page.goto('/#/summary');
+    // 逐步引导是默认入口；这个用例专门验证完整表单的字段与自动保存
+    await page.getByTestId('summary-start').click();
+    await page.getByTestId('summary-advanced').click();
     await expect(page.getByTestId('summary-status')).toBeVisible();
 
     // 训练分区
@@ -41,6 +44,9 @@ test.describe('今日总结：六大分区与自动保存', () => {
     });
 
     await page.reload();
+    // 刷新后默认回到逐步引导，这里重新进入完整表单核对已保存内容
+    await page.getByTestId('summary-start').click();
+    await page.getByTestId('summary-advanced').click();
     await expect(page.getByTestId('summary-status')).toBeVisible();
     await page.getByRole('button', { name: /Apple Watch 与运动数据/ }).click();
     await expect(page.getByTestId('watch-steps')).toHaveValue('9123');
@@ -73,6 +79,8 @@ test.describe('今日总结：六大分区与自动保存', () => {
 
   test('复制到其他日期不会产生重复条目', async ({ page }) => {
     await page.goto('/#/summary');
+    await page.getByTestId('summary-start').click();
+    await page.getByTestId('summary-advanced').click();
     await page.getByTestId('summary-training-items').fill('复制测试训练');
     await expect(page.getByTestId('summary-status')).toContainText('已自动保存', {
       timeout: 15_000,

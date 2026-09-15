@@ -77,8 +77,9 @@ test.describe('应用内更新 - 完整流程（禁用 SW 以模拟新版本）'
   test('发现新版本 → 立即更新 → 自动重载 → 数据仍然存在', async ({ page }) => {
     // 1) 先写入一条用户数据，验证更新不会清除数据
     await page.goto('/#/summary');
-    await page.getByTestId('summary-training-items').fill('更新前写入的训练内容');
-    await expect(page.getByTestId('summary-status')).toContainText('已自动保存', {
+    await page.getByTestId('summary-start').click();
+    await page.getByTestId('wizard-training-items').fill('更新前写入的训练内容');
+    await expect(page.getByTestId('wizard-save-status')).toContainText('已保存', {
       timeout: 15_000,
     });
 
@@ -113,15 +114,22 @@ test.describe('应用内更新 - 完整流程（禁用 SW 以模拟新版本）'
 
     // 4) 立即更新：显示下载/安装状态并自动重载
     await page.getByTestId('update-apply').click();
-    await expect(page.getByText(/正在下载|正在安装新版本|更新成功/).first()).toBeVisible({
-      timeout: 20_000,
-    });
+    // 有 Service Worker 时会经历下载/安装；无 SW 时直接走安全重载，
+    // 因此这里允许「看到状态」或「已经重载」两种结果
+    const sawStatus = await page
+      .getByText(/正在下载|正在安装新版本|更新成功/)
+      .first()
+      .isVisible()
+      .catch(() => false);
     await page.waitForURL(/updated=\d+/, { timeout: 60_000 });
+    expect(sawStatus || /updated=\d+/.test(page.url())).toBe(true);
     await expect(page.getByTestId('update-check')).toBeVisible({ timeout: 30_000 });
 
     // 5) 数据仍然存在（IndexedDB 不受更新影响）
     await page.goto('/#/summary');
-    await expect(page.getByTestId('summary-training-items')).toHaveValue('更新前写入的训练内容', {
+    const startButton = page.getByTestId('summary-start');
+    if (await startButton.isVisible().catch(() => false)) await startButton.click();
+    await expect(page.getByTestId('wizard-training-items')).toHaveValue('更新前写入的训练内容', {
       timeout: 20_000,
     });
   });

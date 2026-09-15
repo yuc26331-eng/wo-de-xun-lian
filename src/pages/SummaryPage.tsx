@@ -23,6 +23,7 @@ import {
 } from '../components/ui';
 import { IconShare, IconTrash } from '../components/icons';
 import { SummaryForm } from '../components/summary/SummaryForm';
+import { SummaryWizard } from '../components/summary/SummaryWizard';
 import { ExportDialog } from '../components/summary/ExportDialog';
 import { ImportChatGptReportButton } from '../components/ImportChatGptReportButton';
 import { useAppData } from '../state/AppData';
@@ -161,6 +162,8 @@ export default function SummaryPage() {
   const [confirmTarget, setConfirmTarget] = useState<string | null>(null);
   const [detailReport, setDetailReport] = useState<ChatGptReport | null>(null);
   const [renameValue, setRenameValue] = useState('');
+  /** 高级模式：直接编辑全部字段（默认走逐步引导） */
+  const [advanced, setAdvanced] = useState(false);
 
   useEffect(() => {
     const s = params.get('start');
@@ -347,19 +350,37 @@ export default function SummaryPage() {
             </Card>
           )}
 
-          <SummaryForm
-            date={activeDate}
-            log={activeLog}
-            onCopyRequest={() => {
-              setCopyTarget(addDays(activeDate, 1));
-              setCopyOpen(true);
-            }}
-            onExportRequest={() => {
-              setExportRange({ start: activeDate, end: activeDate });
-              setExportOpen(true);
-            }}
-            onDeleted={() => setActiveDate(today)}
-          />
+          {/* 默认走逐步引导；需要一次改很多项时可以切到完整表单 */}
+          {advanced ? (
+            <>
+              <div className="row-between" style={{ margin: '4px 0 8px' }}>
+                <span className="small muted">完整表单（所有字段一次显示）</span>
+                <Button size="sm" onClick={() => setAdvanced(false)} data-testid="summary-back-wizard">
+                  返回逐步引导
+                </Button>
+              </div>
+              <SummaryForm
+                date={activeDate}
+                log={activeLog}
+                onCopyRequest={() => {
+                  setCopyTarget(addDays(activeDate, 1));
+                  setCopyOpen(true);
+                }}
+                onExportRequest={() => {
+                  setExportRange({ start: activeDate, end: activeDate });
+                  setExportOpen(true);
+                }}
+                onDeleted={() => setActiveDate(today)}
+              />
+            </>
+          ) : (
+            <SummaryWizard
+              date={activeDate}
+              log={activeLog}
+              onOpenAdvanced={() => setAdvanced(true)}
+              onFinalized={() => toast('今日总结已归档，可以继续训练或休息了', 'success')}
+            />
+          )}
         </div>
       )}
 

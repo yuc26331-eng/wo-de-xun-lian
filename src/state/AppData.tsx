@@ -11,6 +11,7 @@ import {
 import {
   ALL_STORES,
   dbClearAll,
+  dbClear,
   dbDelete,
   dbGet,
   dbGetAll,
@@ -32,6 +33,7 @@ import type {
   AppSettings,
   AttachmentMeta,
   BackupFile,
+  BackupSnapshot,
   BodyMetric,
   ChatGptReport,
   DailyLog,
@@ -80,6 +82,12 @@ export interface AppDataValue {
   /** 截图附件（内存中只保留元数据，二进制按需从 IndexedDB 读取） */
   attachments: AttachmentMeta[];
   chatGptReports: ChatGptReport[];
+  /** 清理前的自动备份留档 */
+  backups: BackupSnapshot[];
+  createBackupSnapshot: (reason: string) => Promise<BackupSnapshot>;
+  deleteBackupSnapshot: (id: string) => Promise<void>;
+  /** 清空全部记录（保留目标、设置与功能），返回删除条数 */
+  clearAllRecords: () => Promise<Record<string, number>>;
 
   savePlan: (plan: TrainingPlan) => Promise<TrainingPlan>;
   createPlanFromDraft: (draft: PlanDraft) => Promise<TrainingPlan>;
@@ -153,6 +161,7 @@ async function bootstrap(): Promise<{
   pdfImports: PdfImportRecord[];
   attachments: AttachmentMeta[];
   chatGptReports: ChatGptReport[];
+  backups: BackupSnapshot[];
   settings: AppSettings;
   liveSession: LiveSession | null;
 }> {
@@ -174,13 +183,15 @@ async function bootstrap(): Promise<{
   const storedAttachments = await dbGetAll('attachments');
   const attachments: AttachmentMeta[] = storedAttachments.map(({ blob: _blob, ...meta }) => meta);
   const chatGptReports = await dbGetAll('chatGptReports');
+  const backups = await dbGetAll('backups');
 
   const settingsRows = await dbGetAll('settings');
-  const settings = settingsRows[0] ?? DEFAULT_SETTINGS;
+  let settings = { ...DEFAULT_SETTINGS, ...(settingsRows[0] ?? {}) };
   if (!settingsRows.length) await dbPut('settings', settings);
 
-  // 第一次打开：写入示例数据，保证功能立刻可用
-  if (!plans.length) {
+  // 第一次打开：写入示例数据，保证功能立刻可用。
+  // 注意：只播种一次 —— 用户清空示例数据后不能再自动写回（否则清理无效）
+  if (!plans.length && !settings.samplesInitialized) {
     plans = createSamplePlans();
     await dbPutMany('plans', plans);
     summaries = createSeedSummaries(plans[0]);
@@ -191,6 +202,11 @@ async function bootstrap(): Promise<{
     await dbPutMany('dailyLogs', dailyLogs);
     goals = createSeedGoals();
     await dbPutMany('goals', goals);
+  }
+  if (!settings.samplesInitialized) {
+    await dbPut('settings', { ...settings, samplesInitialized: true, updatedAt: nowISO() });
+    // 内存里的设置也要带上标记，否则后续写回会把「已播种」覆盖掉，导致示例数据被重新写回
+    settings = { ...settings, samplesInitialized: true };
   }
   if (!exercises.length) {
     exercises = createSeedExercises();
@@ -215,7 +231,8 @@ async function bootstrap(): Promise<{
     pdfImports,
     attachments,
     chatGptReports,
-    settings: { ...DEFAULT_SETTINGS, ...settings },
+    backups,
+    settings,
     liveSession,
   };
 }
@@ -234,6 +251,7 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
   const [pdfImports, setPdfImports] = useState<PdfImportRecord[]>([]);
   const [attachments, setAttachments] = useState<AttachmentMeta[]>([]);
   const [chatGptReports, setChatGptReports] = useState<ChatGptReport[]>([]);
+  const [backups, setBackups] = useState<BackupSnapshot[]>([]);
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
   const [liveSession, setLiveSessionState] = useState<LiveSession | null>(null);
   const booted = useRef(false);
@@ -251,6 +269,7 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
     setPdfImports(data.pdfImports);
     setAttachments(data.attachments);
     setChatGptReports(data.chatGptReports);
+    setBackups(data.backups);
     setSettings(data.settings);
     setLiveSessionState(data.liveSession);
   }, []);
@@ -704,6 +723,118 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
     return new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
   }, [buildBackup]);
 
+  /** 清理前的自动备份留档（保存在本机，可随时导出） */
+  const createBackupSnapshot = useCallback(
+    async (reason: string) => {
+      const base = buildBackup();
+      const snapshot: BackupSnapshot = {
+        id: uid('bk'),
+        createdAt: nowISO(),
+        reason,
+        payload: JSON.stringify(base),
+        summary: {
+          plans: base.data.plans.length,
+          summaries: base.data.summaries.length,
+          dailyLogs: base.data.dailyLogs.length,
+          bodyMetrics: base.data.bodyMetrics.length,
+          chatGptReports: base.data.chatGptReports?.length ?? 0,
+          attachments: base.data.attachments?.length ?? 0,
+        },
+      };
+      await dbPut('backups', snapshot);
+      setBackups((prev) => [snapshot, ...prev]);
+      return snapshot;
+    },
+    [buildBackup],
+  );
+
+  const deleteBackupSnapshot = useCallback(async (id: string) => {
+    await dbDelete('backups', id);
+    setBackups((prev) => prev.filter((b) => b.id !== id));
+  }, []);
+
+  /**
+   * 清空全部记录（保留目标、设置与功能）
+   * 清除：训练会话、训练记录、今日总结（含运动/睡眠/补剂）、历史身体数据、上传截图、示例计划
+   * 保留：动作库、模板、PR、目标、ChatGPT 分析报告、PDF 导入记录、设置与更新通道
+   */
+  const clearAllRecords = useCallback(async () => {
+    const [sessions, summaryRows, logRows, metricRows, attachmentRows, planRows] =
+      await Promise.all([
+        dbGetAll('sessions'),
+        dbGetAll('summaries'),
+        dbGetAll('dailyLogs'),
+        dbGetAll('bodyMetrics'),
+        dbGetAll('attachments'),
+        dbGetAll('plans'),
+      ]);
+    const samplePlans = planRows.filter((p) => p.source === 'sample');
+    const removed: Record<string, number> = {
+      sessions: sessions.length,
+      summaries: summaryRows.length,
+      dailyLogs: logRows.length,
+      bodyMetrics: metricRows.length,
+      attachments: attachmentRows.length,
+      samplePlans: samplePlans.length,
+    };
+
+    await Promise.all([
+      dbClear('sessions'),
+      dbClear('summaries'),
+      dbClear('dailyLogs'),
+      dbClear('bodyMetrics'),
+      dbClear('attachments'),
+    ]);
+    for (const plan of samplePlans) await dbDelete('plans', plan.id);
+
+    // 目标：保留原有目标，并把体重 / 体脂目标更新为指定值
+    const now = nowISO();
+    const goalRows = await dbGetAll('goals');
+    const weightGoal = goalRows.find((g) => g.kind === 'weight');
+    const fatGoal = goalRows.find((g) => /体脂/.test(g.title));
+    await dbPut('goals', {
+      id: weightGoal?.id ?? uid('goal'),
+      title: '目标体重 70 kg',
+      kind: 'weight',
+      startValue: weightGoal?.startValue ?? null,
+      targetValue: 70,
+      unit: 'kg',
+      deadline: weightGoal?.deadline ?? null,
+      note: weightGoal?.note,
+      done: false,
+      createdAt: weightGoal?.createdAt ?? now,
+      updatedAt: now,
+    });
+    await dbPut('goals', {
+      id: fatGoal?.id ?? uid('goal'),
+      title: '目标体脂率低于 12%',
+      kind: 'other',
+      startValue: fatGoal?.startValue ?? null,
+      targetValue: 12,
+      unit: '%',
+      deadline: fatGoal?.deadline ?? null,
+      note: '低于 12%',
+      done: false,
+      createdAt: fatGoal?.createdAt ?? now,
+      updatedAt: now,
+    });
+
+    // 用数据库里最新的设置，避免内存中的旧值把「已播种」等字段覆盖掉
+    const freshSettings = (await dbGetAll('settings'))[0] ?? settings;
+    await dbPut('settings', {
+      ...DEFAULT_SETTINGS,
+      ...freshSettings,
+      id: 'app',
+      bodyWeightGoalKg: 70,
+      bodyFatGoalPct: 12,
+      cleanupAt: now,
+      samplesInitialized: true,
+      updatedAt: now,
+    });
+    await load();
+    return removed;
+  }, [load, settings]);
+
   const restoreBackup = useCallback(
     async (file: BackupFile) => {
       if (!file || file.app !== 'wo-de-xun-lian' || !file.data) {
@@ -788,6 +919,10 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
       liveSession,
       attachments,
       chatGptReports,
+      backups,
+      createBackupSnapshot,
+      deleteBackupSnapshot,
+      clearAllRecords,
       savePlan,
       createPlanFromDraft,
       deletePlan,
@@ -833,15 +968,19 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
     }),
     [
       attachments,
+      backups,
       bodyMetrics,
       buildBackup,
       buildFullBackup,
+      clearAllRecords,
       clearAllData,
       chatGptReports,
+      createBackupSnapshot,
       copyDailyLog,
       createPlanFromDraft,
       dailyLogs,
       deleteAttachment,
+      deleteBackupSnapshot,
       deleteBodyMetric,
       deleteChatGptReport,
       deleteDailyLog,

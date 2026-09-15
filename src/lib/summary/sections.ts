@@ -112,6 +112,8 @@ export const SECTIONS: SectionMeta[] = [
       'creatineG',
       'caffeineMg',
       'others',
+      'supplementsList',
+      'noSupplements',
       'note',
     ],
   },
@@ -160,6 +162,10 @@ export function flattenSection(
         creatineG: log.supplements?.creatineG ?? null,
         caffeineMg: log.supplements?.caffeineMg ?? null,
         others: log.supplements?.others ?? '',
+        supplementsList: (log.supplementsList ?? []).map(
+          (s) => `${s.name}${s.amount ? ` ${s.amount}${s.unit ?? ''}` : ''}`,
+        ),
+        noSupplements: log.noSupplements ? '今天没吃补剂' : null,
         note: log.meals?.note ?? log.diet ?? '',
       };
     case 'notes':

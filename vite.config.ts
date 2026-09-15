@@ -40,11 +40,11 @@ function versionPlugin() {
           RELEASE_NOTES.length > 0
             ? RELEASE_NOTES
             : [
-                '首页改版：首屏直接显示「今天练什么」、预计时长与开始 / 继续训练（含已完成组数）',
-                '跟练优化：大号计时、一键「撤销上一组」、休息页也能撤销误操作，暂停 / 跳过更顺手',
-                '恢复更可靠：切换应用、锁屏、刷新后自动回到当前动作与组数，倒计时按真实时间校准',
-                '记录更可靠：新增保存状态提示与「数据保存在本机」说明；备份导出 / 导入带格式校验与覆盖提示',
-                '看见进步：训练记录开始保存每个动作的实际组数据，数据页可对比同一动作的重量与次数变化',
+                '今日总结改为逐步引导：训练 → 手表数据 → 睡眠 → 强度与感受 → 补剂 → 补充 → 确认，每步自动存草稿',
+                'Apple Watch / 睡眠截图支持本机 OCR 识别（可多张、自动去重、识别结果可修改，识别失败保留图片可重试）',
+                '补剂记录移到今日总结：蛋白粉、肌酸、自定义补剂与「今天没吃」，报告中也会包含',
+                '一次性数据清理：先自动备份（本机留档 + 下载）再清空旧记录，目标保留并更新为体重 70kg、体脂低于 12%',
+                '设置中新增「清空全部记录」入口，随时可清空但默认保留目标与设置',
               ],
       };
       this.emitFile({
@@ -102,7 +102,9 @@ export default defineConfig({
       injectManifest: {
         globPatterns: ['**/*.{js,css,html,png,svg,ttf,woff2,json,webmanifest}'],
         maximumFileSizeToCacheInBytes: 16 * 1024 * 1024,
-        globIgnores: ['**/version.json'],
+        // OCR 运行时与语言模型改为首次识别时按需下载（见 sw.ts 的运行时缓存），
+        // 避免把 15MB 模型塞进首装预缓存
+        globIgnores: ['**/version.json', '**/ocr/**'],
       },
       devOptions: { enabled: false },
     }),

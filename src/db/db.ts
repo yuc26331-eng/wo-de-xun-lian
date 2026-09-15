@@ -1,6 +1,7 @@
 import { openDB, type DBSchema, type IDBPDatabase } from 'idb';
 import type {
   AppSettings,
+  BackupSnapshot,
   BodyMetric,
   ChatGptReport,
   DailyLog,
@@ -16,8 +17,8 @@ import type {
 } from '../types';
 
 export const DB_NAME = 'wo-de-xun-lian';
-/** v2：新增「附件（截图）」「ChatGPT 分析报告」两个 store；旧数据自动保留 */
-export const DB_VERSION = 2;
+/** v3：新增「自动备份留档」store；旧数据自动保留 */
+export const DB_VERSION = 3;
 
 export interface StoreMap {
   plans: TrainingPlan;
@@ -33,6 +34,7 @@ export interface StoreMap {
   pdfImports: PdfImportRecord;
   attachments: StoredAttachment;
   chatGptReports: ChatGptReport;
+  backups: BackupSnapshot;
 }
 
 export type StoreName = keyof StoreMap;
@@ -51,6 +53,7 @@ export const ALL_STORES: StoreName[] = [
   'pdfImports',
   'attachments',
   'chatGptReports',
+  'backups',
 ];
 
 interface FitnessDB extends DBSchema {
@@ -67,6 +70,7 @@ interface FitnessDB extends DBSchema {
   pdfImports: { key: string; value: PdfImportRecord; indexes: { importedAt: string } };
   attachments: { key: string; value: StoredAttachment; indexes: { date: string } };
   chatGptReports: { key: string; value: ChatGptReport; indexes: { startDate: string } };
+  backups: { key: string; value: BackupSnapshot; indexes: { createdAt: string } };
 }
 
 let dbPromise: Promise<IDBPDatabase<FitnessDB>> | null = null;
@@ -117,6 +121,10 @@ export function getDB(): Promise<IDBPDatabase<FitnessDB>> {
             'startDate',
             'startDate',
           );
+        }
+        // v3：数据清理前的自动备份留档（可随时导出）
+        if (!db.objectStoreNames.contains('backups')) {
+          db.createObjectStore('backups', { keyPath: 'id' }).createIndex('createdAt', 'createdAt');
         }
       },
       blocked() {

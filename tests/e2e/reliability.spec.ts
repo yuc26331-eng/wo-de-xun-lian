@@ -101,8 +101,9 @@ test.describe('备份与恢复', () => {
   test('导出完整备份后可以恢复，导入前显示覆盖说明', async ({ page }) => {
     // 先写一条每日记录，验证恢复不会丢数据
     await page.goto('/#/summary');
-    await page.getByTestId('summary-training-items').fill('备份前写入的训练内容');
-    await expect(page.getByTestId('summary-status')).toContainText('已自动保存', {
+    await page.getByTestId('summary-start').click();
+    await page.getByTestId('wizard-training-items').fill('备份前写入的训练内容');
+    await expect(page.getByTestId('wizard-save-status')).toContainText('已保存', {
       timeout: 15_000,
     });
 
@@ -126,7 +127,10 @@ test.describe('备份与恢复', () => {
 
     // 数据仍在
     await page.goto('/#/summary');
-    await expect(page.getByTestId('summary-training-items')).toHaveValue('备份前写入的训练内容', {
+    // 草稿会自动恢复到上次步骤；只有全新的一天才需要点「开始今日总结」
+    const startButton = page.getByTestId('summary-start');
+    if (await startButton.isVisible().catch(() => false)) await startButton.click();
+    await expect(page.getByTestId('wizard-training-items')).toHaveValue('备份前写入的训练内容', {
       timeout: 20_000,
     });
   });

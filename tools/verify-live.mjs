@@ -240,6 +240,74 @@ check(
   backupFile?.suggestedFilename() ?? '未触发下载',
 );
 
+// ---- v1.3 新增：逐步引导 / 截图识别 / 补剂入库 / 一次性清理横幅 ----
+await page.goto(`${url}/#/`, { waitUntil: 'networkidle' });
+const cleanupBanner = await page
+  .getByTestId('cleanup-banner')
+  .isVisible()
+  .catch(() => false);
+check('首页提供一次性数据清理入口（备份后清理）', cleanupBanner);
+
+await page.goto(`${url}/#/summary`, { waitUntil: 'networkidle' });
+await page.getByTestId('summary-start').waitFor({ timeout: 20000 });
+await page.getByTestId('summary-start').click();
+const step1 = (await page.getByTestId('wizard-progress').textContent()) ?? '';
+check('今日总结默认进入逐步引导', /第 1 \/ 7 步/.test(step1), step1.trim());
+
+// 第 1 步：训练
+await page.getByTestId('wizard-training-items').fill('现场验收：下肢力量');
+await page.getByTestId('wizard-next').click();
+// 第 2 步：真实 OCR 识别截图
+const step2 = (await page.getByTestId('wizard-progress').textContent()) ?? '';
+check('进入第 2 步（Apple Watch 截图识别）', /第 2 \/ 7 步/.test(step2), step2.trim());
+await page
+  .getByTestId('ocr-input-watch')
+  .setInputFiles('tests/fixtures/watch-summary.png');
+let ocrOk = false;
+let ocrDetail = '';
+try {
+  await page.getByTestId('ocr-field-watch-activeEnergyKcal').waitFor({ timeout: 240000 });
+  await page.waitForFunction(
+    () => {
+      const el = document.querySelector<HTMLInputElement>(
+        '[data-testid="ocr-field-watch-activeEnergyKcal"]',
+      );
+      return Boolean(el && el.value);
+    },
+    undefined,
+    { timeout: 240000 },
+  );
+  ocrOk = true;
+  ocrDetail =
+    `活动能量=${await page.getByTestId('ocr-field-watch-activeEnergyKcal').inputValue()} ` +
+    `运动分钟=${await page.getByTestId('ocr-field-watch-exerciseMinutes').inputValue()} ` +
+    `步数=${await page.getByTestId('ocr-field-watch-steps').inputValue()} ` +
+    `静息心率=${await page.getByTestId('ocr-field-watch-restingHr').inputValue()}`;
+} catch (err) {
+  ocrDetail = err instanceof Error ? err.message.slice(0, 80) : '识别失败';
+}
+check('线上截图 OCR 识别出运动数据', ocrOk, ocrDetail);
+await page.screenshot({ path: `${out}/live-ocr.png`, fullPage: true });
+
+// 第 5 步：补剂（从「我的」迁移到今日总结）
+await page.getByTestId('wizard-next').click(); // → 第 3 步
+await page.getByTestId('wizard-skip').click(); // → 第 4 步
+await page.getByTestId('wizard-skip').click(); // → 第 5 步
+const step5 = (await page.getByTestId('wizard-progress').textContent()) ?? '';
+check('补剂记录位于今日总结第 5 步', /第 5 \/ 7 步/.test(step5), step5.trim());
+await page.getByTestId('wizard-protein-scoops').fill('2');
+await page.getByTestId('wizard-creatine').fill('5');
+await page.getByRole('button', { name: /镁/ }).click();
+await page.getByTestId('wizard-next').click(); // → 第 6 步
+await page.getByTestId('wizard-next').click(); // → 第 7 步（确认）
+const reviewText = (await page.getByTestId('wizard-review').textContent()) ?? '';
+check(
+  '确认页汇总补剂信息',
+  reviewText.includes('蛋白粉') && reviewText.includes('镁'),
+  reviewText.replace(/\s+/g, ' ').slice(0, 60),
+);
+await page.screenshot({ path: `${out}/live-wizard-review.png`, fullPage: true });
+
 await browser.close();
 
 const failed = results.filter((r) => !r.ok);

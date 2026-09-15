@@ -115,6 +115,10 @@ const fullLog: DailyLog = {
   },
   supplements: { proteinG: 50, proteinScoops: 2, creatineG: 5, caffeineMg: 120, others: '维生素 D' },
   freeNote: '右膝在深蹲最后两组有轻微不适，没有加重。',
+  supplementsList: [
+    { id: 's1', name: '蛋白粉', amount: 30, unit: 'g' },
+    { id: 's2', name: '镁', amount: 200, unit: 'mg' },
+  ],
   createdAt: '2026-09-15T20:00:00.000Z',
   updatedAt: '2026-09-15T20:00:00.000Z',
 };
@@ -218,6 +222,15 @@ describe('Markdown / 纯文本 / JSON 输出', () => {
     expect(md).toContain('# 日期范围汇总');
     expect(md).toContain('总训练次数：1 次');
     expect(md).toContain('数据缺失日期：');
+  });
+
+  it('导出包含补剂清单（自定义补剂名称 / 用量 / 单位）', () => {
+    const md = toMarkdown(days, sum, DEFAULT_INCLUDE);
+    expect(md).toContain('补剂清单：蛋白粉 30g、镁 200mg');
+    const json = JSON.parse(toJson(days, sum, DEFAULT_INCLUDE)) as {
+      days: { date: string; diet?: { meals?: unknown } }[];
+    };
+    expect(json.days.some((d) => d.date === '2026-09-15' && d.diet)).toBe(true);
   });
 
   it('可以只导出选中的分区（隐私勾选）', () => {

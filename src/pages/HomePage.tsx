@@ -40,6 +40,7 @@ import {
 import { useAppData } from '../state/AppData';
 import { dailyProgress } from '../lib/summary/sections';
 import { allTimeStats } from '../lib/progress';
+import { CleanupBanner } from '../components/CleanupBanner';
 import type { ISODate, TrainingPlan, WorkoutSummary } from '../types';
 
 /** 今日计划：优先今天，其次最近的未来计划，最后回退到最近一次计划 */
@@ -216,6 +217,7 @@ export default function HomePage() {
         ) : null
       }
     >
+      <CleanupBanner />
       {/* 今天练什么（首屏最重要的一块） */}
       <Card className="page-enter hero-training" data-testid="today-hero">
         <div className="row-between" style={{ alignItems: 'flex-start' }}>

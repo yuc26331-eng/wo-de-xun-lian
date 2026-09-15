@@ -352,6 +352,7 @@ function daySectionMarkdown(day: DayBundle, include: ExportInclude): string {
   if (include.diet) {
     out.push('### 饮食与补剂');
     const m = log ? flattenSection(log, 'diet') : {};
+    const extraSupp = Array.isArray(m.supplementsList) ? (m.supplementsList as string[]) : [];
     out.push(
       line('早餐', text(m.breakfast) || null),
       line('午餐', text(m.lunch) || null),
@@ -361,6 +362,8 @@ function daySectionMarkdown(day: DayBundle, include: ExportInclude): string {
       line('蛋白粉', num(m.proteinG) ?? num(day.metric?.proteinG), ' g'),
       line('肌酸', num(m.creatineG), ' g'),
       line('咖啡因', num(m.caffeineMg), ' mg'),
+      line('补剂清单', extraSupp.length ? extraSupp.join('、') : null),
+      line('补剂情况', text(m.noSupplements) || null),
       line('其他补剂', text(m.others) || null),
       line('饮食备注', text(m.note) || null),
     );

@@ -212,6 +212,9 @@ export function dayBlocks(day: DayBundle, include: ExportInclude): Block[] {
   if (include.diet) {
     const m = log?.meals ?? {};
     const s = log?.supplements ?? {};
+    const extraSupp = (log?.supplementsList ?? []).map(
+      (x) => `${x.name}${x.amount ? ` ${x.amount}${x.unit ?? ''}` : ''}`,
+    );
     blocks.push({
       title: '饮食与补剂',
       lines: [
@@ -223,6 +226,8 @@ export function dayBlocks(day: DayBundle, include: ExportInclude): Block[] {
         val('蛋白粉', s.proteinG ?? day.metric?.proteinG ?? null, ' g'),
         val('肌酸', s.creatineG, ' g'),
         val('咖啡因', s.caffeineMg, ' mg'),
+        val('补剂清单', extraSupp.length ? extraSupp.join('、') : null),
+        val('补剂情况', log?.noSupplements ? '今天没吃补剂' : null),
         val('其他补剂', s.others ?? null),
         val('饮食备注', m.note ?? null),
       ],

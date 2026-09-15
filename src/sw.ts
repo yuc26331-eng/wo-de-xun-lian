@@ -55,6 +55,15 @@ registerRoute(
   ({ request }) => fetch(request, { cache: 'no-store' }),
 );
 
+// OCR 运行时与语言模型：首次识别截图时下载，之后离线可用（避免拖慢首屏安装）
+registerRoute(
+  ({ url }) => /\/ocr\//.test(url.pathname),
+  new CacheFirst({
+    cacheName: 'ocr-assets',
+    plugins: [new ExpirationPlugin({ maxEntries: 20, maxAgeSeconds: 60 * 60 * 24 * 365 })],
+  }),
+);
+
 /* ------------------------------ 回退支持 ------------------------------ */
 
 async function isRollbackActive(): Promise<boolean> {
