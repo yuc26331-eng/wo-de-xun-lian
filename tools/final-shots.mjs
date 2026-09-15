@@ -14,7 +14,7 @@ const context = await browser.newContext({ ...devices['iPhone 15'], locale: 'zh-
 const page = await context.newPage();
 
 await page.goto(`${url}/`, { waitUntil: 'networkidle' });
-await page.waitForSelector('text=今日计划');
+await page.waitForSelector('[data-testid="today-plan-title"]');
 await page.screenshot({ path: `${out}/home.png` });
 
 await page.getByTestId('start-training').click();

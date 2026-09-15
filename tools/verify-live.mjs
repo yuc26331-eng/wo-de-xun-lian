@@ -34,7 +34,7 @@ async function noHorizontalScroll(label) {
 }
 
 await page.goto(`${url}/`, { waitUntil: 'networkidle' });
-await page.waitForSelector('text=今日计划', { timeout: 30000 });
+await page.waitForSelector('[data-testid="today-plan-title"]', { timeout: 30000 });
 check('线上首页可打开且渲染中文界面', true, url);
 
 await page.screenshot({ path: `${out}/live-home.png`, fullPage: true });
@@ -132,7 +132,7 @@ await page.screenshot({ path: `${out}/live-summary.png`, fullPage: true });
 await context.setOffline(true);
 await page.goto(`${url}/#/`, { waitUntil: 'domcontentloaded' });
 const offlineOk = await page
-  .getByText('今日计划', { exact: true })
+  .getByTestId('today-plan-title')
   .isVisible({ timeout: 20000 })
   .catch(() => false);
 check('离线状态下仍可打开应用', offlineOk);
