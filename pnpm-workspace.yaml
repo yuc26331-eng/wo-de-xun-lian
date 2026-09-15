@@ -1,2 +1,4 @@
-allowBuilds:
-  tesseract.js: set this to true or false
+# pnpm 11 的设置入口：允许 tesseract.js 的安装脚本，
+# 否则 CI 会因为「ignored build scripts」直接失败。
+onlyBuiltDependencies:
+  - tesseract.js
