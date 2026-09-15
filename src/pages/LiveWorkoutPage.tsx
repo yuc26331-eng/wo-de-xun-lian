@@ -566,6 +566,14 @@ export default function LiveWorkoutPage() {
               {target.reps ? ` · ${target.reps} 次` : ''}
               {target.weightKg != null ? ` · ${formatNumber(target.weightKg)}kg` : ''}
             </div>
+            <div
+              className="tiny muted center"
+              style={{ marginTop: 8 }}
+              data-testid="live-progress-done"
+            >
+              已完成 {progress.doneSets}/{progress.plannedSets} 组 · 剩余 {pendingCount} 个动作 ·
+              自动保存中
+            </div>
             <div className="col" style={{ gap: 10, marginTop: 16, width: '100%', maxWidth: 420 }}>
               <Button
                 block

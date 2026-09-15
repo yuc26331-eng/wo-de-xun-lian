@@ -82,8 +82,7 @@ await page.waitForTimeout(500);
 const restVisible = await page.getByTestId('live-rest-timer').isVisible().catch(() => false);
 check('自动进入组间休息倒计时', restVisible);
 const footerText = await page.locator('[data-testid="live-progress-done"]').textContent().catch(() => '');
-const recorded = /已完成\s*1\//.test(footerText ?? '');
-check('完成本组已记录（防重复）', recorded, footerText?.trim() ?? '未找到计数');
+check('完成本组已记录（休息界面显示进度）', /已完成\s*1\//.test(footerText ?? ''), footerText?.trim() ?? '');
 
 // 跳过休息后回到动作卡片，组圆点应显示 1 组已完成
 if (restVisible) {
@@ -92,6 +91,11 @@ if (restVisible) {
 }
 const doneDots = await page.locator('.set-dot.done').count();
 check('动作卡片显示已完成组数', doneDots === 1, `已完成 ${doneDots} 组`);
+const cardProgress = await page
+  .locator('[data-testid="live-progress-done"]')
+  .textContent()
+  .catch(() => '');
+check('完成本组后计数为 1（防重复记录）', /已完成\s*1\//.test(cardProgress ?? ''), cardProgress?.trim() ?? '');
 
 await page.reload({ waitUntil: 'networkidle' });
 await page.waitForSelector('[data-testid="live-progress"]', { timeout: 20000 });
