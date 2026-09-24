@@ -12,6 +12,7 @@ import ImportConfirmPage from './pages/ImportConfirmPage';
 import LiveWorkoutPage from './pages/LiveWorkoutPage';
 import ChatGptReportImportPage from './pages/ChatGptReportImportPage';
 import HistoryImportPage from './pages/HistoryImportPage';
+import SharedPlanImportPage from './pages/SharedPlanImportPage';
 
 /** 主题：跟随系统 / 浅色 / 深色，并同步状态栏颜色 */
 function ThemeSync() {
@@ -48,6 +49,7 @@ export default function App() {
             <Route path="/import/confirm" element={<ImportConfirmPage />} />
         <Route path="/import/chatgpt" element={<ChatGptReportImportPage />} />
         <Route path="/import/history" element={<HistoryImportPage />} />
+            <Route path="/import/shared-plan" element={<SharedPlanImportPage />} />
             <Route path="/history" element={<HistoryPage />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
