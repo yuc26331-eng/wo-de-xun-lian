@@ -44,8 +44,9 @@ test.describe('今日总结：六大分区与自动保存', () => {
     });
 
     await page.reload();
-    // 刷新后默认回到逐步引导，这里重新进入完整表单核对已保存内容
-    await page.getByTestId('summary-start').click();
+    // 已开始的草稿会直接恢复逐步引导；全新记录才需要再次点击开始。
+    const start = page.getByTestId('summary-start');
+    if (await start.isVisible().catch(() => false)) await start.click();
     await page.getByTestId('summary-advanced').click();
     await expect(page.getByTestId('summary-status')).toBeVisible();
     await page.getByRole('button', { name: /Apple Watch 与运动数据/ }).click();

@@ -244,7 +244,7 @@ export default function DataPage() {
   }, [summaries, today]);
 
   const trainedDates = useMemo(() => new Set(summaries.map((s) => s.date)), [summaries]);
-  const selectedSummary = summaries.find((s) => s.date === selectedDate) ?? null;
+  const selectedSummaries = summaries.filter((s) => s.date === selectedDate);
   const selectedMetric = bodyMetrics.find((m) => m.date === selectedDate) ?? null;
   const selectedLog = dailyLogs.find((d) => d.date === selectedDate) ?? null;
 
@@ -288,7 +288,8 @@ export default function DataPage() {
       note: form.note.trim(),
     };
     await saveBodyMetric(patch);
-    if (form.protein != null) {
+    const existingLog = dailyLogs.find((d) => d.date === form.date);
+    if (form.protein != null || existingLog?.supplements?.proteinG != null) {
       await saveDailyLog({
         date: form.date,
         weightKg: form.weight,
@@ -619,29 +620,46 @@ export default function DataPage() {
             <Card>
               <div className="row-between" style={{ marginBottom: 10 }}>
                 <span className="strong">{formatDateCN(selectedDate)}</span>
-                <Chip tone={selectedSummary ? 'green' : 'default'}>
-                  {selectedSummary ? '已训练' : '未训练'}
+                <Chip tone={selectedSummaries.length ? 'green' : 'default'}>
+                  {selectedSummaries.length > 1
+                    ? `${selectedSummaries.length} 次训练`
+                    : selectedSummaries.length
+                      ? '已训练'
+                      : '未训练'}
                 </Chip>
               </div>
-              {selectedSummary ? (
-                <>
-                  <div className="metric-row">
-                    <span className="label">
-                      {KIND_EMOJI[selectedSummary.kind]} {selectedSummary.planTitle}
-                    </span>
-                    <span className="value">{Math.round(selectedSummary.completionRate * 100)}%</span>
+              {selectedSummaries.length ? (
+                selectedSummaries.map((summary, index) => (
+                  <div
+                    key={summary.id}
+                    style={
+                      index > 0
+                        ? {
+                            borderTop: '1px solid var(--sep)',
+                            marginTop: 8,
+                            paddingTop: 8,
+                          }
+                        : undefined
+                    }
+                  >
+                    <div className="metric-row">
+                      <span className="label">
+                        {KIND_EMOJI[summary.kind]} {summary.planTitle}
+                      </span>
+                      <span className="value">{Math.round(summary.completionRate * 100)}%</span>
+                    </div>
+                    <div className="metric-row">
+                      <span className="label">训练量</span>
+                      <span className="value">{formatVolume(summary.totalVolumeKg)}</span>
+                    </div>
+                    <div className="metric-row">
+                      <span className="label">组数 / RPE</span>
+                      <span className="value">
+                        {summary.totalSets} 组 · {summary.rpe ?? '—'}
+                      </span>
+                    </div>
                   </div>
-                  <div className="metric-row">
-                    <span className="label">训练量</span>
-                    <span className="value">{formatVolume(selectedSummary.totalVolumeKg)}</span>
-                  </div>
-                  <div className="metric-row">
-                    <span className="label">组数 / RPE</span>
-                    <span className="value">
-                      {selectedSummary.totalSets} 组 · {selectedSummary.rpe ?? '—'}
-                    </span>
-                  </div>
-                </>
+                ))
               ) : (
                 <div className="tiny muted" style={{ marginBottom: 8 }}>
                   这一天没有训练记录，可以补记身体数据。

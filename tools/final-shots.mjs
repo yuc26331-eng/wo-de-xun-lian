@@ -28,6 +28,10 @@ await page.screenshot({ path: `${out}/data.png` });
 
 // v1.1：今日总结（六大分区）
 await page.goto(`${url}/#/summary`, { waitUntil: 'networkidle' });
+const summaryStart = page.getByTestId('summary-start');
+if (await summaryStart.isVisible().catch(() => false)) await summaryStart.click();
+const summaryAdvanced = page.getByTestId('summary-advanced');
+if (await summaryAdvanced.isVisible().catch(() => false)) await summaryAdvanced.click();
 await page.getByTestId('summary-status').waitFor({ timeout: 20000 });
 await page.waitForTimeout(700);
 await page.screenshot({ path: `${out}/summary.png` });

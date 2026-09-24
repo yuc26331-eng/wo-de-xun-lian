@@ -27,7 +27,7 @@ const MAIN_HEADINGS = [
   '正式训练', '主训练', '训练内容', '训练动作', '动作安排', '主体',
   '训练计划', '力量训练', '有氧训练', '专项训练', '今天训练', '训练安排', '主要训练',
 ];
-const COOLDOWN_HEADINGS = ['拉伸', '放松', '冷身', '整理活动', '恢复', '泡沫轴', 'cooldown'];
+const COOLDOWN_HEADINGS = ['收尾', '拉伸', '放松', '冷身', '整理活动', '恢复', '泡沫轴', 'cooldown'];
 const NOTE_HEADINGS = ['备注', '注意事项', '说明', '教练备注', '提示', '注意'];
 
 const CUE_LABELS = ['动作要领', '技术要点', '要领', '要点', '技巧', '做法', '提示', '发力'];
@@ -43,6 +43,8 @@ interface Block {
   cells?: string[];
   /** 该表格的表头（用于按列取数） */
   header?: string[];
+  /** 边界由启发式推断（例如混合编号中无编号的动作） */
+  inferred?: boolean;
 }
 
 const RUN_RE = /跑|冲刺|慢跑|间歇|百米|折返跑/;
@@ -67,9 +69,13 @@ export function parseTargetFromText(text: string): TargetSpec {
   // 组数 × 次数（4x5、4 组 × 5 次、4组x8-12次）
   const sxr = t.match(/(\d{1,2})\s*(?:组)?\s*[x×*]\s*(\d{1,3}(?:\s*[-–~]\s*\d{1,3})?)\s*(?:次|个|reps?)?/i);
   const setsOnly = t.match(/(\d{1,2})\s*组/);
+  const setsRange = t.match(/(\d{1,2})\s*[-–~]\s*(\d{1,2})\s*组/);
   const setsLabel = t.match(/组数\s*[:：]?\s*(\d{1,2})/);
   if (setsLabel) target.sets = Number(setsLabel[1]);
-  else if (sxr) target.sets = Number(sxr[1]);
+  else if (setsRange) {
+    target.setsText = `${setsRange[1]}-${setsRange[2]}`;
+    target.sets = Number(setsRange[2]);
+  } else if (sxr) target.sets = Number(sxr[1]);
   else if (setsOnly) target.sets = Number(setsOnly[1]);
 
   const repsLabel = t.match(/次数\s*[:：]?\s*(\d{1,3}(?:\s*[-–~]\s*\d{1,3})?)/);
@@ -79,6 +85,24 @@ export function parseTargetFromText(text: string): TargetSpec {
   else if (repsText) target.reps = repsText[1].replace(/\s/g, '');
   else if (/力竭|amrap/i.test(t)) target.reps = '力竭';
   else if (target.sets == null && sxr) target.reps = sxr[2]?.replace(/\s/g, '') ?? null;
+
+  // 时间型动作：秒数不能塞进 reps，否则跟练会显示成“次”。
+  // 范围保留原文，durationSec 存上限供默认计时与记录使用。
+  const timedAfterX = t.match(
+    /[x×*]\s*(\d{1,3})(?:\s*[-–~]\s*(\d{1,3}))?\s*(秒|分钟|分|s\b|min)(?:\s*\/\s*(侧|边))?/i,
+  );
+  if (timedAfterX) {
+    const min = Number(timedAfterX[1]);
+    const max = Number(timedAfterX[2] ?? timedAfterX[1]);
+    const unit = /分|min/i.test(timedAfterX[3]) ? '分钟' : '秒';
+    const factor = unit === '分钟' ? 60 : 1;
+    const perSide = Boolean(timedAfterX[4]);
+    const side = perSide ? '/侧' : '';
+    target.durationSec = Math.round(max * factor);
+    target.durationText = `${min === max ? min : `${min}-${max}`}${unit}${side}`;
+    target.durationPerSide = perSide;
+    target.reps = null;
+  }
 
   // 重量
   const kg = t.match(/(?:重量|负重|负荷|使用)?\s*[:：]?\s*(\d{1,3}(?:\.\d+)?)\s*(?:kg|公斤|千克)/i);
@@ -180,7 +204,15 @@ function splitExerciseBlocks(lines: string[]): Block[] {
     fieldSeen = false;
   };
 
-  for (const raw of lines) {
+  const numbered = (line: string): boolean => {
+    if (tableCells(line)) return false;
+    const bullet = stripBullet(line);
+    return bullet.index != null && bullet.text.length > 0;
+  };
+  const numberedMode = lines.filter(numbered).length >= 2;
+
+  for (let lineIndex = 0; lineIndex < lines.length; lineIndex += 1) {
+    const raw = lines[lineIndex];
     const cells = tableCells(raw);
     if (cells) {
       const isHeaderRow =
@@ -205,10 +237,51 @@ function splitExerciseBlocks(lines: string[]): Block[] {
       continue;
     }
 
-    const { text, index } = stripBullet(raw);
-    if (!text) continue;
+    const stripped = stripBullet(raw);
+    if (!stripped.text) continue;
+
+    // 带明确序号的卡片/列表：序号是动作边界，序号后的所有说明都归同一动作。
+    // 不能再用“下一行没有组次数据”猜边界，否则动作要领会被切成伪动作。
+    if (numberedMode) {
+      if (stripped.index != null) {
+        push();
+        current = { head: stripped.text, lines: [] };
+        fieldSeen = /(组|次|kg|公斤|休息|rpe|配速|心率|时间|距离|要领|注意)/i.test(stripped.text);
+        continue;
+      }
+      if (!current) continue;
+      const text = stripped.text;
+      const compact = normalizeText(text).replace(/\s+/g, ' ').trim();
+      const nextText = stripBullet(lines[lineIndex + 1] ?? '').text;
+      const looksField = /(组|次|kg|公斤|休息|rpe|配速|心率|时间|距离|要领|注意)/i.test(text);
+      const nextLooksField = /(组|次|kg|公斤|休息|rpe|配速|心率|时间|距离|要领|注意)/i.test(nextText);
+      const inlineCut = compact.search(
+        /(\d{1,2}\s*组|\d{1,2}\s*[x×*]\s*\d|@\s*\d|组数|次数|重量|休息|rpe|rir|配速|心率|距离|时长|时间\s*[:：]|要领|注意)/i,
+      );
+      const inlineName =
+        inlineCut > 1 &&
+        /[A-Za-z\u3400-\u9fff]/.test(compact.slice(0, inlineCut)) &&
+        !/^(?:组间|组内|休息|间歇|组数|次数|重量|rpe|rir|动作要领|要领|注意|重点)/i.test(compact);
+      const nextStartsAction =
+        fieldSeen &&
+        !looksField &&
+        nextLooksField &&
+        compact.length <= 60 &&
+        !/^(?:组间|组内|休息|间歇|动作要领|要领|注意|重点|提示|说明|备注)/.test(compact);
+      if (inlineName || nextStartsAction) {
+        push();
+        current = { head: text, lines: [], inferred: true };
+        fieldSeen = looksField;
+      } else {
+        current.lines.push(text);
+        if (looksField) fieldSeen = true;
+      }
+      continue;
+    }
+
+    const text = stripped.text;
     const looksField = /(组|次|kg|公斤|休息|rpe|配速|心率|时间|距离|要领|注意)/i.test(text);
-    const isNumbered = index != null || /^[-*•·]/.test(normalizeText(raw).trim());
+    const isNumbered = stripped.index != null || /^[-*•·]/.test(normalizeText(raw).trim());
     const startsNew = isNumbered || (fieldSeen && !looksField) || !current;
 
     if (startsNew) {
@@ -228,7 +301,16 @@ const FIELD_CUT =
   /(\d{1,2}\s*组|\d{1,2}\s*[x×*]\s*\d|@\s*\d|组数|次数|重量|休息|rpe|rir|配速|心率|速度|距离|时长|时间\s*[:：]|要领|注意)/i;
 
 function nameFromBlock(block: Block): string {
-  let head = normalizeText(block.head).replace(/\s+/g, ' ').trim();
+  const candidates = [block.head, ...block.lines]
+    .map((line) => normalizeText(line).replace(/\s+/g, ' ').trim())
+    .filter(Boolean);
+  let head =
+    candidates.find(
+      (line) =>
+        !/^\d{1,2}(?:[.、)）])?$/.test(line) &&
+        !FIELD_CUT.test(line) &&
+        !parseDateLoose(line),
+    ) ?? candidates[0] ?? '';
   head = head.replace(/^(动作|项目|名称|练习)\s*[:：]\s*/, '');
   const cut = head.search(FIELD_CUT);
   let name = cut > 0 ? head.slice(0, cut) : head;
@@ -381,7 +463,7 @@ function guessTitle(lines: string[], fileName?: string): string {
   for (const line of lines.slice(0, 5)) {
     const t = line.replace(/^[#*\s]+/, '').trim();
     if (!t) continue;
-    if (/^\d/.test(t)) continue;
+    if (/^\d/.test(t) && !/^\d{1,3}\s*(?:分钟|分|小时).*(?:计划|训练|课程)/.test(t)) continue;
     if (/^(计划|训练)?\s*(日期|时间|时长)/.test(t)) continue;
     if (parseDateLoose(t) && t.length <= 14) continue;
     if (/^(健身|训练|周|今日).{0,4}(计划|安排|记录)$/.test(t)) continue;
@@ -397,14 +479,59 @@ function guessTitle(lines: string[], fileName?: string): string {
 function guessMinutes(lines: string[]): number | null {
   for (const line of lines.slice(0, 12)) {
     const hit = matchLabel(line, ['预计时长', '预计训练时间', '总时长', '训练时长', '时长', '用时']);
-    const source = hit?.value ?? (/(预计|大约|约)?\s*\d{1,3}\s*[-–~到至]\s*\d{1,3}\s*(分钟|min)/i.test(line) ? line : null);
+    const source =
+      hit?.value ??
+      (/(?:预计|大约|约)?\s*\d{1,3}\s*(?:分钟|min|分)/i.test(line) &&
+      !/\d+\s*组/.test(line) &&
+      !/热身|拉伸|放松|收尾|整理活动|冷身|每组/.test(line)
+        ? line
+        : null);
     if (!source) continue;
     const range = source.match(/(\d{1,3})\s*[-–~到至]\s*(\d{1,3})/);
     if (range) return Number(range[2]);
-    const single = source.match(/(\d{1,3})\s*(?:分钟|min|分)/i);
+    const single = source.match(/(?:约|大约|预计)?\s*(\d{1,3})\s*(?:分钟|min|分)/i);
     if (single) return Number(single[1]);
   }
   return null;
+}
+
+function looksLikeSectionHeading(line: string, keywords: string[]): boolean {
+  const raw = normalizeText(line).replace(/^[#*\s]+/, '').trim();
+  if (!raw || raw.includes(':') || raw.includes(',') || raw.includes('|')) return false;
+  return keywords.some((keyword) => {
+    if (!raw.startsWith(keyword)) return false;
+    const rest = raw.slice(keyword.length).replace(/[（(].*?[）)]/g, '').trim();
+    return !rest || /^(?:约)?\d{1,3}\s*(?:分钟|分|秒)$/.test(rest);
+  });
+}
+
+/** 卡片 PDF 的页眉/页脚常带日期、总时长和“5个主动作”，不能当训练正文。 */
+function isLikelyPageMeta(line: string): boolean {
+  const text = normalizeText(line).trim();
+  if (!text || text.length > 90 || !parseDateLoose(text)) return false;
+  return /主动作|训练|计划|课表/.test(text) && /[/｜|·]/.test(text);
+}
+
+function declaredMainExerciseCount(text: string): number | null {
+  const normalized = normalizeText(text);
+  const hit =
+    normalized.match(/(\d{1,2})\s*个主动作/) ??
+    normalized.match(/主动作\s*[:：]?\s*(\d{1,2})\s*个/);
+  return hit ? Number(hit[1]) : null;
+}
+
+function isSuspiciousExerciseName(name: string): boolean {
+  const text = normalizeText(name).replace(/\s+/g, ' ').trim();
+  if (!text) return true;
+  if (/^\d{1,2}(?:[.、)）])?$/.test(text)) return true;
+  if (/^(?:总时长|主动作|强度|休息|热身|收尾|目标|说明|备注)(?:\s|$)/.test(text)) return true;
+  if (/^(?:第?\d+\s*页|page\s*\d+)/i.test(text)) return true;
+  if (parseDateLoose(text) && text.length <= 32) return true;
+  if (/^(?:约)?\d+\s*(?:分钟|分|小时)(?:\d+\s*(?:个|组|次))?$/.test(text)) return true;
+  if (/[/｜|]/.test(text) && parseDateLoose(text)) return true;
+  if (text.length > 36 && /[，。；]/.test(text)) return true;
+  if (!/[A-Za-z\u3400-\u9fff]/.test(text)) return true;
+  return false;
 }
 
 /* ---------------------------------------------------------------- 主入口 */
@@ -430,6 +557,7 @@ interface PlanBody {
 
 export function parsePlanBody(text: string, opts: ParsePlanOptions): PlanBody {
   const lines = cleanLines(text);
+  const contentLines = lines.filter((line) => !isLikelyPageMeta(line));
   const sessionKind = detectSessionKind(text);
   const warnings: string[] = [];
 
@@ -449,16 +577,21 @@ export function parsePlanBody(text: string, opts: ParsePlanOptions): PlanBody {
   const META_LABELS = ['日期', '计划日期', '预计训练时间', '预计时长', '总时长', '训练时长', '计划名称', '地点', '教练', '训练目标'];
 
   let current: Section = 'meta';
-  for (const line of lines) {
-    if (isHeading(line, WARMUP_HEADINGS)) {
+  for (let lineIndex = 0; lineIndex < contentLines.length; lineIndex += 1) {
+    const line = contentLines[lineIndex];
+    if (isHeading(line, WARMUP_HEADINGS) || looksLikeSectionHeading(line, WARMUP_HEADINGS)) {
       current = 'warmup';
       continue;
     }
-    if (isHeading(line, NOTE_HEADINGS) && !isHeading(line, MAIN_HEADINGS)) {
+    if (looksLikeSectionHeading(line, NOTE_HEADINGS) && !isHeading(line, MAIN_HEADINGS)) {
       current = 'notes';
       continue;
     }
-    if (isHeading(line, COOLDOWN_HEADINGS) && !isHeading(line, MAIN_HEADINGS)) {
+    if (
+      current !== 'warmup' &&
+      (isHeading(line, COOLDOWN_HEADINGS) || looksLikeSectionHeading(line, COOLDOWN_HEADINGS)) &&
+      !isHeading(line, MAIN_HEADINGS)
+    ) {
       current = 'cooldown';
       continue;
     }
@@ -466,6 +599,16 @@ export function parsePlanBody(text: string, opts: ParsePlanOptions): PlanBody {
       current = 'main';
       continue;
     }
+    const coolHit =
+      current === 'main'
+        ? matchLabel(line, ['拉伸放松', '拉伸与恢复', '拉伸恢复', '拉伸', '放松'], 'rest')
+        : null;
+    if (coolHit) {
+      current = 'cooldown';
+      sections.cooldown.push(`${coolHit.label}：${coolHit.value}`);
+      continue;
+    }
+
     if (current === 'meta' && matchLabel(line, META_LABELS, 'rest')) {
       sections.meta.push(line);
       continue;
@@ -487,28 +630,39 @@ export function parsePlanBody(text: string, opts: ParsePlanOptions): PlanBody {
       continue;
     }
     if (current === 'meta' && looksLikeExerciseLine(line)) current = 'main';
+    // 卡片式计划常常没有「正式训练」标题：热身段落之后，只有遇到带独立组次行的
+    // 编号卡片才进入主动作；普通「1. 动态拉伸」仍留在热身，不能误切。
+    const nextLine = contentLines[lineIndex + 1] ?? '';
+    if (
+      (current === 'warmup' || current === 'meta') &&
+      /^\d{1,2}\s*[.、)）]\s+\S/.test(normalizeText(line)) &&
+      !/热身|慢跑|快走|动态拉伸|激活|活动度/.test(normalizeText(line)) &&
+      looksLikeExerciseLine(nextLine)
+    ) {
+      current = 'main';
+    }
     sections[current].push(line);
   }
 
   const metaLines = sections.meta;
   const dateHit =
-    [...metaLines, ...lines.slice(0, 8)].map((l) => parseDateLoose(l)).find((d) => d) ??
+    [...metaLines, ...lines].map((l) => parseDateLoose(l)).find((d) => d) ??
     parseDateLoose(opts.fileName ?? '');
-  const title = guessTitle(lines, opts.fileName);
-  const estimatedMinutes = guessMinutes(lines);
+  const title = guessTitle(contentLines, opts.fileName);
+  const estimatedMinutes = guessMinutes(contentLines);
 
   // 2. 热身
   let warmup = parseWarmupLines(sections.warmup);
   if (!warmup.length) {
     // 没有热身小节时，从 meta 里找「热身」开头的行
-    const inline = lines.filter((l) => /^热身/.test(normalizeText(l)) && !isHeading(l, WARMUP_HEADINGS));
+    const inline = contentLines.filter((l) => /^热身/.test(normalizeText(l)) && !isHeading(l, WARMUP_HEADINGS));
     if (inline.length) warmup = parseWarmupLines(inline);
   }
 
   // 3. 正式训练动作
   let mainLines = sections.main;
   if (!mainLines.length) {
-    mainLines = lines.filter((l) => !metaLines.includes(l) && !sections.notes.includes(l) && !sections.cooldown.includes(l));
+    mainLines = contentLines.filter((l) => !metaLines.includes(l) && !sections.notes.includes(l) && !sections.cooldown.includes(l));
   }
   const blocks = splitExerciseBlocks(mainLines);
   const exercises: ExerciseItem[] = [];
@@ -532,7 +686,7 @@ export function parsePlanBody(text: string, opts: ParsePlanOptions): PlanBody {
   const cooldown = [...sections.cooldown, ...cooldownExtra].join('\n').trim();
   const notes = sections.notes.join('\n').trim();
 
-  // 5. 置信度与提示
+  // 5. 置信度与提示：结构缺失、疑似噪声名称或标称动作数不一致时，不能继续显示高完整度。
   let score = 0;
   const total = 5;
   if (title && title !== '导入的训练计划') score += 1;
@@ -540,13 +694,54 @@ export function parsePlanBody(text: string, opts: ParsePlanOptions): PlanBody {
   if (warmup.length) score += 0.5;
   if (keptExercises.length) score += 1.5;
   if (keptExercises.some((e) => e.target.sets && e.target.reps)) score += 1;
-  const confidence = Math.max(0.1, Math.min(1, score / total));
+  let confidence = Math.max(0.1, Math.min(1, score / total));
 
   if (!keptExercises.length) warnings.push('没有识别到训练动作，请手动添加，或确认 PDF 是否为文字型文件。');
   if (!dateHit) warnings.push('未识别到训练日期，已默认使用今天，可手动修改。');
-  const noTargets = keptExercises.filter((e) => !e.target.sets && !e.target.reps && !e.target.durationSec);
-  if (noTargets.length) warnings.push(`有 ${noTargets.length} 个动作未识别到组数/次数，请手动补全。`);
-  if (keptExercises.length > 0 && keptExercises.length < 2) warnings.push('只识别到 1 个动作，请检查 PDF 排版是否为多列。');
+
+  const hasInferredBlocks = blocks.some((block) => block.inferred);
+  if (hasInferredBlocks) {
+    warnings.push('检测到无编号或混合编号的动作段落，已按组次行推断边界，请核对是否漏项或合并。');
+    confidence = Math.min(confidence, 0.85);
+  }
+
+  const suspicious = keptExercises.filter((e) => isSuspiciousExerciseName(e.name));
+  if (suspicious.length) {
+    warnings.push(
+      `有 ${suspicious.length} 个动作名称可能是序号、页眉或说明文字，请核对后再保存。`,
+    );
+    confidence = Math.min(confidence, 0.45);
+  }
+
+  const noTargets = keptExercises.filter(
+    (e) => e.target.sets == null && e.target.reps == null && !e.target.durationSec && !e.target.distanceKm,
+  );
+  if (noTargets.length) {
+    warnings.push(`有 ${noTargets.length} 个动作未识别到组数/次数或训练时长，请手动补全。`);
+    confidence = Math.min(confidence, 0.65);
+  }
+  if (keptExercises.length > 0 && keptExercises.length < 2) {
+    warnings.push('只识别到 1 个动作，请检查 PDF 排版是否为多列。');
+    confidence = Math.min(confidence, 0.6);
+  }
+
+  const declaredCount = declaredMainExerciseCount(text);
+  if (declaredCount != null && declaredCount !== keptExercises.length) {
+    warnings.push(
+      `文件标称 ${declaredCount} 个主动作，但当前识别到 ${keptExercises.length} 个，请核对动作是否完整。`,
+    );
+    confidence = Math.min(confidence, 0.5);
+  }
+
+  const targetLineCount = mainLines.filter((line) =>
+    /(\d{1,2}\s*组|\d{1,2}\s*[x×*]\s*\d)/.test(normalizeText(line)),
+  ).length;
+  if (targetLineCount > keptExercises.length && targetLineCount >= 2) {
+    warnings.push(
+      `检测到 ${targetLineCount} 条组次/时长目标，但只整理出 ${keptExercises.length} 个动作，请重点核对是否合并或漏项。`,
+    );
+    confidence = Math.min(confidence, 0.6);
+  }
 
   return {
     title,

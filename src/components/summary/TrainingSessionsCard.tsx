@@ -6,9 +6,10 @@
 import { useState } from 'react';
 import type { ISODate, SessionKind, TrainingSection, TrainingSessionDetail, WatchData } from '../../types';
 import { SESSION_KIND_LABEL } from '../../types';
-import { Button, Field, NumberInput, Segmented, TextArea, TextInput } from '../ui';
+import { Button, Field, NumberInput, Segmented, TextArea, TextInput, useToast } from '../ui';
 import { IconTrash } from '../icons';
 import { uid } from '../../lib/format';
+import { useAppData } from '../../state/AppData';
 import { ScreenshotStep } from './ScreenshotStep';
 
 export interface TrainingSessionsCardProps {
@@ -46,8 +47,11 @@ export function TrainingSessionsCard({
   onChange,
   onDirty,
 }: TrainingSessionsCardProps) {
+  const { attachments, deleteAttachment } = useAppData();
+  const toast = useToast();
   const sessions = training?.sessions ?? [];
   const [confirmRemove, setConfirmRemove] = useState<string | null>(null);
+  const [removingSession, setRemovingSession] = useState<string | null>(null);
   const [showLegacy, setShowLegacy] = useState(true);
 
   const legacyCount = training?.sessionCount ?? null;
@@ -67,11 +71,25 @@ export function TrainingSessionsCard({
     onDirty();
   };
 
-  const removeSession = (id: string) => {
-    const next = sessions.filter((s) => s.id !== id);
-    onChange({ sessions: next, sessionCount: next.length || null });
-    setConfirmRemove(null);
-    onDirty();
+  const removeSession = async (id: string) => {
+    if (removingSession) return;
+    setRemovingSession(id);
+    try {
+      // 截图二进制独立保存在 attachments store；删卡片时必须按 sessionId
+      // 一并删除，否则会留下界面再也访问不到的孤儿数据。
+      const owned = attachments.filter((attachment) => attachment.sessionId === id);
+      await Promise.all(owned.map((attachment) => deleteAttachment(attachment.id)));
+
+      const next = sessions.filter((s) => s.id !== id);
+      onChange({ sessions: next, sessionCount: next.length || null });
+      setConfirmRemove(null);
+      onDirty();
+    } catch (err) {
+      console.error('[summary] 删除训练场次失败', err);
+      toast('删除失败，请重试', 'error');
+    } finally {
+      setRemovingSession(null);
+    }
   };
 
   /** 旧记录 → 训练卡片：把原文完整保留到每张卡片的训练内容里 */
@@ -135,9 +153,10 @@ export function TrainingSessionsCard({
                   className="link"
                   style={{ marginLeft: 6 }}
                   data-testid={`session-remove-confirm-${index}`}
-                  onClick={() => removeSession(s.id ?? String(index))}
+                  disabled={removingSession === (s.id ?? String(index))}
+                  onClick={() => void removeSession(s.id ?? String(index))}
                 >
-                  确认删除
+                  {removingSession === (s.id ?? String(index)) ? '正在删除…' : '确认删除'}
                 </button>
                 <button className="link" style={{ marginLeft: 6 }} onClick={() => setConfirmRemove(null)}>
                   取消

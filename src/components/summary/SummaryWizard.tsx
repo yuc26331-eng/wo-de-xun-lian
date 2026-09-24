@@ -88,20 +88,6 @@ export function SummaryWizard({ date, log, onOpenAdvanced, onFinalized }: Summar
   const dirty = useRef(false);
   const dateRef = useRef(date);
 
-  // 切换日期时重新载入
-  useEffect(() => {
-    if (dateRef.current === date) return;
-    dateRef.current = date;
-    dirty.current = false;
-    setDraft(normalizeDailyLog(log, date));
-    setStatus('clean');
-    setSavedAt(log?.updatedAt ?? null);
-    const idx = STEPS.findIndex((s) => s.key === (log?.lastStep as StepKey | undefined));
-    setStepIndex(idx >= 0 ? idx : 0);
-    setStarted(log?.status === 'draft');
-    setEditingFinal(false);
-  }, [date, log]);
-
   const step = STEPS[stepIndex];
   const daySummaries = useMemo(() => summaries.filter((s) => s.date === date), [summaries, date]);
 
@@ -158,9 +144,13 @@ export function SummaryWizard({ date, log, onOpenAdvanced, onFinalized }: Summar
           diet: draft.meals?.note ?? '',
           note: draft.freeNote ?? '',
         });
-        dirty.current = false;
-        setStatus('saved');
-        setSavedAt(saved.updatedAt);
+        // 日期切换期间可能仍在完成旧日期的异步保存。旧保存不能清掉新日期
+        // 后续产生的 dirty，也不能覆盖新日期的保存状态。
+        if (dateRef.current === date) {
+          dirty.current = false;
+          setStatus('saved');
+          setSavedAt(saved.updatedAt);
+        }
         if (body.weightKg != null || body.bodyFatPct != null) {
           await saveBodyMetric({
             date,
@@ -172,15 +162,48 @@ export function SummaryWizard({ date, log, onOpenAdvanced, onFinalized }: Summar
         return saved;
       } catch (err) {
         console.error('[wizard] 保存失败', err);
-        setStatus('error');
+        if (dateRef.current === date) setStatus('error');
         toast('保存失败，请检查浏览器存储空间', 'error');
         return null;
       } finally {
-        setSaving(false);
+        if (dateRef.current === date) setSaving(false);
       }
     },
     [date, draft, onFinalized, saveBodyMetric, saveDailyLog, step.key, toast],
   );
+
+  // 生命周期监听器保持稳定；真正保存时从 ref 读取最新草稿对应的 persist，
+  // 避免每次输入后重绑监听器或在卸载时写回旧闭包中的草稿。
+  const persistRef = useRef(persist);
+  const startedRef = useRef(started);
+
+  // 日期切换时两个 ref 仍保留上一渲染的值，因此可以把旧日期的最新草稿
+  // 写回旧日期；重置完成后，下方 effects 再同步新日期的 persist/started。
+  useEffect(() => {
+    if (dateRef.current === date) return;
+    if (startedRef.current && dirty.current) void persistRef.current();
+    dateRef.current = date;
+    dirty.current = false;
+    setDraft(normalizeDailyLog(log, date));
+    setStatus('clean');
+    setSavedAt(log?.updatedAt ?? null);
+    setSaving(false);
+    const idx = STEPS.findIndex((s) => s.key === (log?.lastStep as StepKey | undefined));
+    setStepIndex(idx >= 0 ? idx : 0);
+    setStarted(log?.status === 'draft');
+    setEditingFinal(false);
+  }, [date, log]);
+
+  useEffect(() => {
+    persistRef.current = persist;
+  }, [persist]);
+  useEffect(() => {
+    startedRef.current = started;
+  }, [started]);
+
+  const flushPending = useCallback(() => {
+    if (startedRef.current && dirty.current) void persistRef.current();
+  }, []);
 
   // 防抖自动保存
   useEffect(() => {
@@ -189,14 +212,19 @@ export function SummaryWizard({ date, log, onOpenAdvanced, onFinalized }: Summar
     return () => clearTimeout(timer);
   }, [draft, persist, started]);
 
-  // 离开页面前尽力保存
+  // 离开页面、切到后台或被 SPA 路由卸载前尽力保存
   useEffect(() => {
-    const onLeave = () => {
-      if (started && dirty.current) void persist();
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') flushPending();
     };
-    window.addEventListener('pagehide', onLeave);
-    return () => window.removeEventListener('pagehide', onLeave);
-  }, [persist, started]);
+    window.addEventListener('pagehide', flushPending);
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    return () => {
+      window.removeEventListener('pagehide', flushPending);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+      flushPending();
+    };
+  }, [flushPending]);
 
   const markStepDone = useCallback(
     (key: StepKey) =>

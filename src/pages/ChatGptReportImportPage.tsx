@@ -1,5 +1,5 @@
 /**
- * ChatGPT 报告导入确认页
+ * 分析报告导入确认页
  * 预览：报告标题 / 覆盖日期范围 / 报告正文 / 评价 / 建议 / 风险提醒 / 原始 PDF
  * 用户确认后才写入「ChatGPT 分析报告」历史，绝不覆盖每日原始记录。
  */
@@ -120,15 +120,15 @@ export default function ChatGptReportImportPage() {
 
   if (!draft) {
     return (
-      <Page title="导入 ChatGPT 报告" back>
+      <Page title="导入分析报告 PDF" back>
         <Card>
           <EmptyState
             emoji="📄"
-            title="没有待确认的报告"
-            desc="请先在「总结 → ChatGPT 分析报告」里选择要导入的 PDF 文件"
+            title="没有待确认的分析报告"
+            desc="请先在「总结 → 计划 / 报告导入」里选择分析报告 PDF"
             action={
               <Button variant="primary" block size="lg" onClick={() => navigate('/summary?tab=chatgpt')}>
-                去导入报告
+                去导入分析报告
               </Button>
             }
           />

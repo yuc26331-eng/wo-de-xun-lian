@@ -13,7 +13,7 @@ interface Rule {
 const RULES: Rule[] = [
   // 强特征：标题里写明了类型
   { kind: 'weekly-plan', weight: 6, strong: true, test: /周(训练)?计划|本周训练|一周训练周?计划|训练周期安排/ },
-  { kind: 'daily-summary', weight: 6, strong: true, test: /(今日)?(训练)?(总结|复盘|日志)|daily\s*summary/i },
+  { kind: 'daily-summary', weight: 6, strong: true, test: /(?:^|\n)\s*(?:今日|每日|当天)?(?:训练)?(?:总结|复盘|日志)(?:\s*[（(].*[）)])?\s*(?=\n|$)|^\s*daily\s*summary\s*$/im },
   { kind: 'body-report', weight: 6, strong: true, test: /身体(数据|成分)报告|体测报告|体质报告|inbody|体脂率报告/i },
   { kind: 'plan', weight: 5, strong: true, test: /(训练|健身|今日|本周|力量|有氧)?(训练)?计划|训练安排|训练课表|课表/ },
 
@@ -35,6 +35,24 @@ const RULES: Rule[] = [
   { kind: 'plan', weight: 0.8, test: /rpe|rm\b|配速|心率/gi },
 ];
 
+/** 只检查文档自身页首标题，不把文件名混入类型优先级。 */
+export function hasPlanDocumentTitle(text: string): boolean {
+  const firstLine = normalizeText(text)
+    .split(/\n+/)
+    .map((line) => line.trim())
+    .find(Boolean);
+  if (!firstLine || firstLine.length > 42) return false;
+  if (/分析|总结|复盘|报告/.test(firstLine)) return false;
+  return /计划|课表|训练安排/.test(firstLine);
+}
+
+/** 文件标题或文档标题任一明确写“计划”时，视为计划强信号。 */
+export function looksLikePlanDocumentTitle(text: string, fileName = ''): boolean {
+  const name = normalizeText(fileName).replace(/[_-]+/g, ' ').trim();
+  if (/计划|课表|训练安排/.test(name) && !/分析|总结|复盘|报告/.test(name)) return true;
+  return hasPlanDocumentTitle(text);
+}
+
 export interface ClassifyResult {
   kind: PdfKind;
   scores: Record<PdfKind, number>;
@@ -43,7 +61,17 @@ export interface ClassifyResult {
 }
 
 export function classifyPdf(text: string, fileName = ''): ClassifyResult {
+  const normalized = normalizeText(text);
   const hay = normalizeText(`${fileName}\n${text}`);
+  const lines = normalized.split(/\n+/).map((line) => line.trim()).filter(Boolean);
+  const head = lines.slice(0, 8).join('\n');
+  const titleLead = `${fileName}\n${lines[0] ?? ''}`;
+  const explicitPlanTitle = hasPlanDocumentTitle(normalized);
+  const explicitPlanKind: PdfKind | null = explicitPlanTitle
+    ? /周(?:训练)?计划|本周训练|一周训练/.test(lines[0] ?? '')
+      ? 'weekly-plan'
+      : 'plan'
+    : null;
   const scores: Record<PdfKind, number> = {
     plan: 0,
     'daily-summary': 0,
@@ -55,7 +83,14 @@ export function classifyPdf(text: string, fileName = ''): ClassifyResult {
 
   for (const rule of RULES) {
     const re = new RegExp(rule.test.source, rule.test.flags.includes('g') ? 'gi' : 'i');
-    const matches = hay.match(re);
+    // “训练总结”只有出现在页首独立标题时才作为强信号；正文中偶然提到不能覆盖计划。
+    const source =
+      rule.strong && (rule.kind === 'daily-summary' || rule.kind === 'plan')
+        ? rule.kind === 'plan'
+          ? titleLead
+          : head
+        : hay;
+    const matches = source.match(re);
     if (matches?.length) {
       const times = rule.test.flags.includes('g') ? Math.min(matches.length, 3) : 1;
       scores[rule.kind] += rule.weight * times;
@@ -75,13 +110,18 @@ export function classifyPdf(text: string, fileName = ''): ClassifyResult {
   const total = entries.reduce((sum, k) => sum + scores[k], 0);
 
   // 命中强特征时以强特征为准（标题优先级：周计划 > 总结 > 身体报告 > 计划）
-  const kind = strongKind ?? bestByScore;
+  const kind = explicitPlanKind ?? strongKind ?? bestByScore;
   if (kind === 'unknown' || (scores[kind] < 2 && !strongKind)) {
     return { kind: 'unknown', scores, confidence: 0 };
   }
   return {
     kind,
     scores,
-    confidence: total > 0 ? Math.min(1, Math.max(0.45, scores[kind] / total + 0.2)) : 0.4,
+    confidence:
+      explicitPlanKind != null
+        ? Math.max(0.9, total > 0 ? scores[kind] / total + 0.2 : 0.9)
+        : total > 0
+          ? Math.min(1, Math.max(0.45, scores[kind] / total + 0.2))
+          : 0.4,
   };
 }

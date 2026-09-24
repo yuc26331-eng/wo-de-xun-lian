@@ -84,6 +84,7 @@ import type {
   LiveSession,
   SessionKind,
   SetRecord,
+  TargetSpec,
   TrainingPlan,
 } from '../types';
 import './live.css';
@@ -91,6 +92,7 @@ import './live.css';
 interface EditorState {
   weightKg: number | null;
   reps: number | null;
+  durationSec: number | null;
   durationMin: number | null;
   distanceKm: number | null;
   hrBpm: number | null;
@@ -100,6 +102,7 @@ interface EditorState {
 const EMPTY_EDITOR: EditorState = {
   weightKg: null,
   reps: null,
+  durationSec: null,
   durationMin: null,
   distanceKm: null,
   hrBpm: null,
@@ -111,11 +114,24 @@ function editorFromSet(set: { weightKg: number | null; reps: number | null; dura
   return {
     weightKg: set.weightKg,
     reps: set.reps,
+    durationSec: set.durationSec ?? null,
     durationMin: set.durationSec != null ? Math.round((set.durationSec / 60) * 10) / 10 : null,
     distanceKm: set.distanceKm ?? null,
     hrBpm: set.hrBpm ?? null,
     rpe: set.rpe ?? null,
   };
+}
+
+
+function isTimedTarget(target: TargetSpec | null): boolean {
+  return target != null && (target.durationSec != null || Boolean(target.durationText));
+}
+
+function targetPrescription(target: TargetSpec | null): string | null {
+  if (!target) return null;
+  if (target.durationText) return target.durationText;
+  if (target.reps) return `${target.reps} 次`;
+  return null;
 }
 
 export default function LiveWorkoutPage() {
@@ -155,9 +171,16 @@ export default function LiveWorkoutPage() {
   const [noteDraft, setNoteDraft] = useState('');
   const [editSet, setEditSet] = useState<SetRecord | null>(null);
   const [editKind, setEditKind] = useState<SessionKind>('strength');
+  const [editTimed, setEditTimed] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const [editForm, setEditForm] = useState<EditorState>(EMPTY_EDITOR);
   const [stashing, setStashing] = useState(false);
+  /**
+   * 结束训练是多步异步写入；state 来不及阻止同一轮事件里的第二次点击，
+   * 因此同时用同步 ref 做 single-flight 锁。
+   */
+  const finishingRef = useRef(false);
+  const [finishing, setFinishing] = useState(false);
   const [finishForm, setFinishForm] = useState({
     weight: '',
     rpe: '',
@@ -255,6 +278,7 @@ export default function LiveWorkoutPage() {
   const target = exercise ? effectiveTarget(exercise) : null;
   const pendingSet = exercise ? nextPendingSet(exercise) : null;
   const isCardio = exercise ? kindIsCardio(exercise.kind) : false;
+  const timedTarget = exercise ? !isCardio && isTimedTarget(target) : false;
   const allSetsDone = exercise ? doneSetCount(exercise) >= exercise.sets.length : false;
   const paused = view?.status === 'paused';
   const lastEx = progress ? progress.index >= progress.total - 1 : false;
@@ -315,7 +339,14 @@ export default function LiveWorkoutPage() {
           hrBpm: editor.hrBpm,
           rpe: editor.rpe,
         }
-      : { weightKg: editor.weightKg, reps: editor.reps, rpe: editor.rpe };
+      : timedTarget
+        ? {
+            weightKg: editor.weightKg,
+            durationSec: editor.durationSec,
+            reps: null,
+            rpe: editor.rpe,
+          }
+        : { weightKg: editor.weightKg, reps: editor.reps, rpe: editor.rpe };
     const res = mutate((s) => completeSetAndRest(s, set.id, patch, settings.defaultRestSec));
     if (res?.changed) {
       const nextEx = res.session.exercises.find((x) => x.exerciseId === ex.exerciseId);
@@ -326,7 +357,7 @@ export default function LiveWorkoutPage() {
         toast('本动作全部完成！');
       }
     }
-  }, [editor, guardTap, isCardio, mutate, settings.defaultRestSec, toast]);
+  }, [editor, guardTap, isCardio, mutate, settings.defaultRestSec, timedTarget, toast]);
 
   const onFinishExercise = useCallback(() => {
     const cur = sessionRef.current;
@@ -386,17 +417,25 @@ export default function LiveWorkoutPage() {
   }, [mutate, painLevel, painNote, painSite, toast]);
 
   const onFinishSession = useCallback(async () => {
+    if (finishingRef.current) return;
     const cur = sessionRef.current;
     if (!cur) return;
-    const summary = finishSession(cur, {
-      bodyWeightKg: finishForm.weight ? Number(finishForm.weight) : latestWeight,
-      rpe: finishForm.rpe ? Number(finishForm.rpe) : null,
-      fatigue: finishForm.fatigue ? Number(finishForm.fatigue) : null,
-      feeling: finishForm.feeling.trim() || undefined,
-      note: finishForm.note.trim() || undefined,
-    });
+    finishingRef.current = true;
+    setFinishing(true);
     try {
-      await saveSummary(summary);
+      // 如果上一次已写入总结、但后续标记会话完成失败，重试时复用已有记录，
+      // 避免同一个 session 产生第二条 summary。
+      const existing = summaries.find((item) => item.sessionId === cur.id);
+      const summary =
+        existing ??
+        finishSession(cur, {
+          bodyWeightKg: finishForm.weight ? Number(finishForm.weight) : latestWeight,
+          rpe: finishForm.rpe ? Number(finishForm.rpe) : null,
+          fatigue: finishForm.fatigue ? Number(finishForm.fatigue) : null,
+          feeling: finishForm.feeling.trim() || undefined,
+          note: finishForm.note.trim() || undefined,
+        });
+      if (!existing) await saveSummary(summary);
       // 先把会话标记为已完成（避免重新打开应用时又恢复这次训练），再清空内存状态
       await setLiveSession(finishedSession(cur, new Date(summary.endedAt)));
       await setLiveSession(null);
@@ -408,8 +447,11 @@ export default function LiveWorkoutPage() {
     } catch (err) {
       console.error('[live] 保存总结失败', err);
       toast('保存失败，请重试', 'error');
+    } finally {
+      finishingRef.current = false;
+      setFinishing(false);
     }
-  }, [finishForm, latestWeight, navigate, saveSummary, setLiveSession, toast]);
+  }, [finishForm, latestWeight, navigate, saveSummary, setLiveSession, summaries, toast]);
 
   const onExit = useCallback(() => {
     const cur = sessionRef.current;
@@ -454,18 +496,25 @@ export default function LiveWorkoutPage() {
           hrBpm: editForm.hrBpm,
           rpe: editForm.rpe,
         }
-      : {
-          weightKg: editForm.weightKg,
-          reps: editForm.reps,
-          rpe: editForm.rpe,
-        };
+      : editTimed
+        ? {
+            weightKg: editForm.weightKg,
+            durationSec: editForm.durationSec,
+            reps: null,
+            rpe: editForm.rpe,
+          }
+        : {
+            weightKg: editForm.weightKg,
+            reps: editForm.reps,
+            rpe: editForm.rpe,
+          };
     const res = mutate((s) => updateSetRecord(s, editSet.id, patch));
     if (res?.changed) {
       setEditOpen(false);
       setEditSet(null);
       toast('已保存这一组的修改', 'success');
     }
-  }, [editForm, editKind, editSet, mutate, toast]);
+  }, [editForm, editKind, editSet, editTimed, mutate, toast]);
 
   /**
    * 一键撤销上一组：训练中误点「完成本组」时最常用的补救操作。
@@ -510,9 +559,7 @@ export default function LiveWorkoutPage() {
         ex?.name ?? ''
       }），已完成 ${done} 组`,
     );
-    // 仅在首次挂载时提示一次
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [toast, view]);
 
   /* --------------------------------------------------------------- 渲染 */
   if (!ready) {
@@ -690,7 +737,7 @@ export default function LiveWorkoutPage() {
             </Ring>
             <div className="small muted" style={{ marginTop: 14 }}>
               下一组：{exercise.name}
-              {target.reps ? ` · ${target.reps} 次` : ''}
+              {targetPrescription(target) ? ` · ${targetPrescription(target)}` : ''}
               {target.weightKg != null ? ` · ${formatNumber(target.weightKg)}kg` : ''}
             </div>
             <div className="tiny muted" style={{ marginTop: 6 }}>
@@ -758,13 +805,13 @@ export default function LiveWorkoutPage() {
               <div className="wrap" style={{ marginTop: 8 }}>
                 <Chip tone="accent">
                   {plannedSetCount(exercise)} 组
-                  {target.reps ? ` × ${target.reps}` : ''}
+                  {targetPrescription(target) ? ` × ${targetPrescription(target)}` : ''}
                 </Chip>
                 {target.weightKg != null && (
                   <Chip>{formatNumber(target.weightKg)} kg</Chip>
                 )}
                 {target.weightText && <Chip>{target.weightText}</Chip>}
-                {target.durationSec != null && (
+                {target.durationSec != null && !target.durationText && (
                   <Chip>{formatMinSec(target.durationSec)}</Chip>
                 )}
                 {target.distanceKm != null && (
@@ -831,14 +878,8 @@ export default function LiveWorkoutPage() {
                       if (!s.done) return;
                       setEditSet(s);
                       setEditKind(exercise.kind);
-                      setEditForm({
-                        weightKg: s.weightKg,
-                        reps: s.reps,
-                        rpe: s.rpe ?? null,
-                        durationMin: s.durationSec != null ? s.durationSec / 60 : null,
-                        distanceKm: s.distanceKm ?? null,
-                        hrBpm: s.hrBpm ?? null,
-                      });
+                      setEditTimed(isTimedTarget(target));
+                      setEditForm(editorFromSet(s));
                       setEditOpen(true);
                     }}
                   >
@@ -921,15 +962,33 @@ export default function LiveWorkoutPage() {
                           testId="live-set-weight"
                         />
                       </Field>
-                      <Field label="实际次数">
-                        <NumberInput
-                          value={editor.reps}
-                          onChange={(v) => setEditor((e) => ({ ...e, reps: v }))}
-                          dec={0}
-                          placeholder={target.reps ?? '10'}
-                          testId="live-set-reps"
-                        />
-                      </Field>
+                      {timedTarget ? (
+                        <Field
+                          label={
+                            target.durationPerSide ?? target.durationText?.includes('/侧')
+                              ? '实际时长（秒/侧）'
+                              : '实际时长（秒）'
+                          }
+                        >
+                          <NumberInput
+                            value={editor.durationSec}
+                            onChange={(v) => setEditor((e) => ({ ...e, durationSec: v }))}
+                            dec={0}
+                            placeholder={target.durationText ?? '30'}
+                            testId="live-set-duration"
+                          />
+                        </Field>
+                      ) : (
+                        <Field label="实际次数">
+                          <NumberInput
+                            value={editor.reps}
+                            onChange={(v) => setEditor((e) => ({ ...e, reps: v }))}
+                            dec={0}
+                            placeholder={target.reps ?? '10'}
+                            testId="live-set-reps"
+                          />
+                        </Field>
+                      )}
                       <Field label="本组 RPE">
                         <NumberInput
                           value={editor.rpe}
@@ -1210,14 +1269,25 @@ export default function LiveWorkoutPage() {
                   testId="set-edit-weight"
                 />
               </Field>
-              <Field label="实际次数">
-                <NumberInput
-                  value={editForm.reps}
-                  dec={0}
-                  onChange={(v) => setEditForm((e) => ({ ...e, reps: v }))}
-                  testId="set-edit-reps"
-                />
-              </Field>
+              {editTimed ? (
+                <Field label="实际时长（秒）">
+                  <NumberInput
+                    value={editForm.durationSec}
+                    dec={0}
+                    onChange={(v) => setEditForm((e) => ({ ...e, durationSec: v }))}
+                    testId="set-edit-duration-sec"
+                  />
+                </Field>
+              ) : (
+                <Field label="实际次数">
+                  <NumberInput
+                    value={editForm.reps}
+                    dec={0}
+                    onChange={(v) => setEditForm((e) => ({ ...e, reps: v }))}
+                    testId="set-edit-reps"
+                  />
+                </Field>
+              )}
             </>
           )}
           <Field label="本组 RPE（1-10）">
@@ -1327,9 +1397,10 @@ export default function LiveWorkoutPage() {
             variant="primary"
             size="xl"
             onClick={onFinishSession}
+            disabled={finishing}
             data-testid="live-finish-confirm"
           >
-            保存总结
+            {finishing ? '保存中…' : '保存总结'}
           </Button>
         }
       >

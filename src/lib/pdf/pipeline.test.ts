@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { classifyPdf } from './classify';
+import { classifyPdf, looksLikePlanDocumentTitle } from './classify';
 import { itemsToLines, pagesToText } from './layout';
-import { diffDailyLog, draftToDailyLogPatch, findDuplicateImport } from './draft';
+import { diffDailyLog, draftToDailyLogPatch, findDuplicateImport, findSavedImportForIntent } from './draft';
 import { parseSummaryText } from './parseSummary';
 import {
   BODY_TEXT,
@@ -29,6 +29,25 @@ describe('classifyPdf', () => {
 
   it('内容不足时返回 unknown', () => {
     expect(classifyPdf(SCANNED_TEXT, 'x.pdf').kind).toBe('unknown');
+  });
+
+  it('明确计划标题优先于前几行的“训练总结”小节', () => {
+    const text = `全身力量训练计划
+日期：2026-09-15
+训练总结
+本次状态不错，下次保持重量。
+动作：深蹲 3组 x 10次`;
+    expect(classifyPdf(text, '任意文件名.pdf').kind).toBe('plan');
+  });
+
+  it('分析报告建议中的“下周训练计划”不算计划标题', () => {
+    const text = `训练分析报告
+本周训练完成情况正常。
+建议
+下周训练计划
+继续保持每周三次力量训练。`;
+    expect(looksLikePlanDocumentTitle(text, '训练分析报告.pdf')).toBe(false);
+    expect(looksLikePlanDocumentTitle('全身力量训练计划', '任意.pdf')).toBe(true);
   });
 });
 
@@ -128,6 +147,15 @@ describe('findDuplicateImport', () => {
       saved: true,
     },
   ];
+
+  it('计划入口忽略以前误存成总结的同一 PDF', () => {
+    const reimportRecords = [
+      { ...records[0], id: 'old-summary', kind: 'daily-summary' as const },
+      { ...records[0], id: 'saved-plan', kind: 'plan' as const },
+    ];
+    expect(findSavedImportForIntent([reimportRecords[0]], '下肢力量.pdf', 120000, 'plan')).toBeNull();
+    expect(findSavedImportForIntent(reimportRecords, '下肢力量.pdf', 120000, 'plan')?.id).toBe('saved-plan');
+  });
 
   it('同名同大小且已保存时判定为重复', () => {
     expect(findDuplicateImport(records, '下肢力量.pdf', 120500)?.id).toBe('p1');

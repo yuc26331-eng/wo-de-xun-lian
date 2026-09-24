@@ -34,6 +34,16 @@ describe('parseTargetFromText', () => {
     expect(parseTargetFromText('引体向上 3组×8次 自重').weightText).toBe('自重');
     expect(parseTargetFromText('深蹲 5组×3次 80% 1RM').weightText).toBe('80% 1RM');
   });
+
+  it('时间范围与每侧保留为时长，不写进次数', () => {
+    const t = parseTargetFromText('哥本哈根侧桥 2-3组 × 25-35秒/侧');
+    expect(t.sets).toBe(3);
+    expect(t.setsText).toBe('2-3');
+    expect(t.durationSec).toBe(35);
+    expect(t.durationText).toBe('25-35秒/侧');
+    expect(t.durationPerSide).toBe(true);
+    expect(t.reps).toBeNull();
+  });
 });
 
 describe('parsePlanText - 逐行字段排版', () => {
@@ -80,6 +90,40 @@ describe('parsePlanText - 逐行字段排版', () => {
 
   it('给出合理的置信度', () => {
     expect(draft.confidence).toBeGreaterThan(0.6);
+  });
+});
+
+describe('parsePlanText - 解析质量提示', () => {
+  it('明显可疑的动作名称和缺失组次会明确提示并降低可信度', () => {
+    const draft = parsePlanText(
+      `训练计划
+日期：2026-09-15
+热身
+动态拉伸 5分钟
+正式训练
+1. 热身 3分钟
+2. 深蹲
+3. 32`,
+      { importId: 'bad-plan', fileName: '训练计划.pdf' },
+    );
+
+    expect(draft.confidence).toBeLessThanOrEqual(0.45);
+    expect(draft.warnings.some((w) => w.includes('动作名称可能'))).toBe(true);
+    expect(draft.warnings.some((w) => w.includes('组数/次数'))).toBe(true);
+  });
+});
+
+describe('parsePlanText - 时长与可靠性', () => {
+  it('只有热身时长时，不把热身分钟数当成整堂训练时长', () => {
+    const draft = parsePlanText(
+      `全身训练计划
+日期：2026-09-15
+热身 5分钟
+正式训练
+1. 深蹲 3组 × 10次`,
+      { importId: 'warmup-only-time', fileName: '全身训练计划.pdf' },
+    );
+    expect(draft.estimatedMinutes).toBeNull();
   });
 });
 

@@ -26,6 +26,7 @@ import { SummaryForm } from '../components/summary/SummaryForm';
 import { SummaryWizard } from '../components/summary/SummaryWizard';
 import { ExportDialog } from '../components/summary/ExportDialog';
 import { ImportChatGptReportButton } from '../components/ImportChatGptReportButton';
+import { PdfImportButton } from '../components/PdfImportButton';
 import { ReportArchiveCard } from '../components/summary/ReportArchiveCard';
 import { DayAttachmentsCard } from '../components/summary/DayAttachmentsCard';
 import { useAppData } from '../state/AppData';
@@ -254,7 +255,7 @@ export default function SummaryPage() {
         options={[
           { value: 'today', label: '今日记录' },
           { value: 'records', label: '我的每日记录' },
-          { value: 'chatgpt', label: 'ChatGPT 报告' },
+          { value: 'chatgpt', label: '计划 / 报告导入' },
         ]}
       />
 
@@ -554,13 +555,34 @@ export default function SummaryPage() {
         <div style={{ marginTop: 14 }}>
           <Card>
             <div className="strong" style={{ marginBottom: 6 }}>
-              导入 ChatGPT 生成的报告
+              导入训练计划
             </div>
-            <div className="tiny muted" style={{ marginBottom: 10 }}>
-              支持 1 天 / 3 天 / 5 天 / 7 天 / 10 天或任意日期范围的分析报告；解析后先预览再保存，
-              不会覆盖你每天填写的原始记录。
+            <div className="tiny muted" style={{ marginBottom: 10, lineHeight: 1.7 }}>
+              用于 ChatGPT 生成的训练计划 PDF；确认后会创建到「训练计划」，不会保存成分析报告。
             </div>
-            <ImportChatGptReportButton block size="lg" />
+            <PdfImportButton
+              block
+              size="lg"
+              label="选择训练计划 PDF"
+              testId="import-plan-from-summary"
+              intent="plan"
+            />
+          </Card>
+
+          <Card>
+            <div className="strong" style={{ marginBottom: 6 }}>
+              导入分析报告
+            </div>
+            <div className="tiny muted" style={{ marginBottom: 10, lineHeight: 1.7 }}>
+              用于 1 天 / 3 天 / 5 天 / 7 天 / 10 天或任意日期范围的分析报告；只保存到下方报告档案，
+              不会创建训练计划，也不会覆盖每天填写的原始记录。
+            </div>
+            <ImportChatGptReportButton
+              block
+              size="lg"
+              label="选择分析报告 PDF"
+              testId="import-analysis-report-from-summary"
+            />
           </Card>
 
           <SectionTitle>{`已保存的报告（${reportsSorted.length}）`}</SectionTitle>
@@ -568,7 +590,7 @@ export default function SummaryPage() {
             <Card>
               <EmptyState
                 emoji="🧠"
-                title="还没有导入过 ChatGPT 报告"
+                title="还没有保存分析报告"
                 desc="导入后可按日期范围与原始记录对照查看，也可以重命名和删除"
               />
             </Card>
