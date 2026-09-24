@@ -18,6 +18,7 @@ describe('parseTargetFromText', () => {
     expect(t.reps).toBe('8-12');
     expect(t.weightKg).toBe(18);
     expect(t.restSec).toBe(120);
+    expect(t.restText).toBe('2分钟');
   });
 
   it('解析时间型与跑步字段', () => {
@@ -124,6 +125,25 @@ describe('parsePlanText - 时长与可靠性', () => {
       { importId: 'warmup-only-time', fileName: '全身训练计划.pdf' },
     );
     expect(draft.estimatedMinutes).toBeNull();
+  });
+});
+
+describe('parsePlanText - 文档级间歇', () => {
+  it('单项缺休息时继承文档级休息范围', () => {
+    const draft = parsePlanText(
+      `核心训练计划
+日期：2026-09-25
+总时长 30分钟
+主动作 2个
+强度 RPE 6-7
+休息 30-45秒
+1. 死虫式 3组 x 10次
+2. 侧桥 3组 x 20秒`,
+      { importId: 'global-rest', fileName: '核心训练计划.pdf' },
+    );
+    expect(draft.exercises).toHaveLength(2);
+    expect(draft.exercises.every((exercise) => exercise.target.restSec === 45)).toBe(true);
+    expect(draft.exercises.every((exercise) => exercise.target.restText === '30-45秒')).toBe(true);
   });
 });
 

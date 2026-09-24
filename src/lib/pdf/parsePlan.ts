@@ -52,6 +52,27 @@ const RIDE_RE = /骑行|单车|自行车|功率车|动感单车|骑/;
 const BALL_RE = /足球|带球|射门|传球|绕杆|对抗|小场|颠球|盘带/;
 const STRETCH_RE = /拉伸|放松|泡沫轴|瑜伽|筋膜|活动度/;
 
+export function parseRestText(text: string): { restSec: number; restText: string } | null {
+  const normalized = normalizeText(text).replace(/\s+/g, ' ');
+  const labelIndex = normalized.indexOf('休息');
+  if (labelIndex < 0) return null;
+  const t = normalized.slice(labelIndex);
+  const range = t.match(/(\d{1,3})\s*[-–~到至]\s*(\d{1,3})\s*(秒|分钟|分|min|s\b)/i);
+  if (range) {
+    const unit = /分|min/i.test(range[3]) ? '分钟' : '秒';
+    const factor = unit === '分钟' ? 60 : 1;
+    return {
+      restSec: Math.round(Number(range[2]) * factor),
+      restText: `${range[1]}-${range[2]}${unit}`,
+    };
+  }
+  const single = t.match(/(\d{1,3})\s*(秒|分钟|分|min|s\b)/i);
+  if (!single) return null;
+  const unit = /分|min/i.test(single[2]) ? '分钟' : '秒';
+  const factor = unit === '分钟' ? 60 : 1;
+  return { restSec: Math.round(Number(single[1]) * factor), restText: `${single[1]}${unit}` };
+}
+
 function kindFromName(name: string, fallback: SessionKind): SessionKind {
   if (BALL_RE.test(name)) return 'football';
   if (RIDE_RE.test(name)) return 'ride';
@@ -117,14 +138,10 @@ export function parseTargetFromText(text: string): TargetSpec {
   else if (/自重|徒手|无负重/.test(t)) target.weightText = '自重';
 
   // 组间休息
-  const rest = t.match(/(?:组间|组内|间歇)?\s*休息\s*[:：]?\s*(\d{1,3}(?:\.\d+)?)\s*(秒|s\b|sec|分钟|分|min)?/i);
+  const rest = /休息/.test(t) ? parseRestText(t) : null;
   if (rest) {
-    const unit = rest[2] ?? '秒';
-    const n = Number(rest[1]);
-    target.restSec = /分|min/.test(unit) ? Math.round(n * 60) : Math.round(n);
-  } else {
-    const rest2 = t.match(/(\d{1,3})\s*(?:秒|s)\s*(?:组间休息|间歇)/i);
-    if (rest2) target.restSec = Number(rest2[1]);
+    target.restSec = rest.restSec;
+    target.restText = rest.restText;
   }
 
   // RPE / RIR
@@ -672,7 +689,7 @@ export function parsePlanBody(text: string, opts: ParsePlanOptions): PlanBody {
   }
   // 没有目标数值、且名字像放松内容的块，归到拉伸恢复而不是动作
   const cooldownExtra: string[] = [];
-  const keptExercises = exercises.filter((e) => {
+  let keptExercises = exercises.filter((e) => {
     const noTarget =
       !e.target.sets && !e.target.reps && e.target.weightKg == null && !e.target.durationSec && !e.target.distanceKm;
     if (noTarget && /拉伸|放松|泡沫轴|冷身|整理活动|恢复/.test(e.name)) {
@@ -682,6 +699,23 @@ export function parsePlanBody(text: string, opts: ParsePlanOptions): PlanBody {
     return true;
   });
 
+  const globalRest = parseRestText(contentLines.slice(0, 12).join(' '));
+  if (globalRest) {
+    keptExercises = keptExercises.map((exercise) =>
+      exercise.target.restSec == null
+        ? {
+            ...exercise,
+            target: {
+              ...exercise.target,
+              restSec: globalRest.restSec,
+              restText: globalRest.restText,
+            },
+          }
+        : exercise,
+    );
+  }
+
+  // 4. 拉伸 / 恢复 / 备注
   // 4. 拉伸 / 恢复 / 备注
   const cooldown = [...sections.cooldown, ...cooldownExtra].join('\n').trim();
   const notes = sections.notes.join('\n').trim();
