@@ -822,7 +822,12 @@ export default function LiveWorkoutPage() {
                 {target.hrBpm != null && <Chip tone="red">心率 {target.hrBpm}</Chip>}
                 {target.playMin != null && <Chip tone="green">上场 {target.playMin} 分钟</Chip>}
                 {target.rpe != null && <Chip tone="orange">RPE {target.rpe}</Chip>}
-                <Chip tone="default">休息 {formatMinSec(effectiveTarget(exercise).restSec ?? settings.defaultRestSec)}</Chip>
+                <Chip tone="default">
+                  休息{' '}
+                  {exercise.override?.restSec != null
+                    ? formatMinSec(exercise.override.restSec)
+                    : target.restText ?? formatMinSec(effectiveTarget(exercise).restSec ?? settings.defaultRestSec)}
+                </Chip>
               </div>
               {(exercise.cue || exercise.notes) && (
                 <div className="lw-cue">

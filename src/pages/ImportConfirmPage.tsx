@@ -477,8 +477,18 @@ function PlanConfirm({
               <NumberInput
                 value={ex.target.restSec ?? null}
                 dec={0}
-                onChange={(v) => patchEx(ex.id, { target: { ...ex.target, restSec: v } })}
+                testId={`ex-rest-${i}`}
+                onChange={(v) =>
+                  patchEx(ex.id, {
+                    target: { ...ex.target, restSec: v, restText: v != null ? `${v}秒` : null },
+                  })
+                }
               />
+              {ex.target.restText && (
+                <div className="tiny muted" style={{ marginTop: 4 }}>
+                  原文间歇 {ex.target.restText}，跟练按上限 {ex.target.restSec ?? '-'} 秒计算
+                </div>
+              )}
             </Field>
             <Field label="RPE">
               <NumberInput

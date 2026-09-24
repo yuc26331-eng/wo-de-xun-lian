@@ -49,6 +49,8 @@ export interface TargetSpec {
   weightText?: string | null;
   /** 组间休息（秒） */
   restSec?: number | null;
+  /** 原始休息文本，例如 '30-45秒' */
+  restText?: string | null;
   /** RPE 要求 */
   rpe?: number | null;
   rpeText?: string | null;

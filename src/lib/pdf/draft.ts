@@ -43,12 +43,75 @@ export function saveDraftToSession(draft: AnyDraft): void {
   }
 }
 
+function isOptionalNullableNumber(value: unknown): value is number | null | undefined {
+  return value == null || typeof value === 'number';
+}
+
+function isPlanDraftShape(value: unknown): value is PlanDraft {
+  if (!value || typeof value !== 'object') return false;
+  const plan = value as Partial<PlanDraft>;
+  if (
+    typeof plan.importId !== 'string' ||
+    typeof plan.fileName !== 'string' ||
+    typeof plan.title !== 'string' ||
+    (plan.date != null && typeof plan.date !== 'string') ||
+    typeof plan.sessionKind !== 'string' ||
+    !Array.isArray(plan.warmup) ||
+    !Array.isArray(plan.exercises) ||
+    typeof plan.cooldown !== 'string' ||
+    typeof plan.notes !== 'string' ||
+    typeof plan.confidence !== 'number' ||
+    !Array.isArray(plan.warnings)
+  ) {
+    return false;
+  }
+  return plan.exercises.every((exercise) => {
+    if (!exercise || typeof exercise !== 'object') return false;
+    const item = exercise as Partial<PlanDraft['exercises'][number]>;
+    if (
+      typeof item.id !== 'string' ||
+      typeof item.name !== 'string' ||
+      typeof item.kind !== 'string' ||
+      typeof item.order !== 'number' ||
+      !item.target ||
+      typeof item.target !== 'object'
+    ) {
+      return false;
+    }
+    const target = item.target;
+    return (
+      isOptionalNullableNumber(target.sets) &&
+      isOptionalNullableNumber(target.durationSec) &&
+      isOptionalNullableNumber(target.weightKg) &&
+      isOptionalNullableNumber(target.restSec) &&
+      isOptionalNullableNumber(target.rpe) &&
+      (target.durationText == null || typeof target.durationText === 'string') &&
+      (target.durationPerSide == null || typeof target.durationPerSide === 'boolean') &&
+      (target.restText == null || typeof target.restText === 'string') &&
+      (target.reps == null || typeof target.reps === 'string')
+    );
+  });
+}
+
+function isSupportedDraftShape(value: unknown): value is AnyDraft {
+  if (!value || typeof value !== 'object') return false;
+  const draft = value as Partial<AnyDraft> & { days?: unknown };
+  if (draft.kind === 'plan') return isPlanDraftShape(draft);
+  if (draft.kind === 'weekly-plan') {
+    return typeof draft.importId === 'string' && Array.isArray(draft.days) && draft.days.every(isPlanDraftShape);
+  }
+  return SUPPORTED.includes(draft.kind as AnyDraft['kind']);
+}
+
 export function readDraftFromSession(): AnyDraft | null {
   try {
     const raw = sessionStorage.getItem(DRAFT_KEY);
     if (!raw) return null;
-    const parsed = JSON.parse(raw) as AnyDraft;
-    if (!parsed || !SUPPORTED.includes(parsed.kind)) return null;
+    const parsed = JSON.parse(raw) as unknown;
+    if (!isSupportedDraftShape(parsed)) {
+      console.warn('[pdf] 忽略字段缺失或类型不正确的导入草稿');
+      return null;
+    }
     return parsed;
   } catch {
     return null;

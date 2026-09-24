@@ -3,12 +3,21 @@
  * - 支持 iPhone 文件选择器与电脑拖拽
  * - 扫描版（无文字层）会被明确标记为需要 OCR
  */
-import * as pdfjs from 'pdfjs-dist';
-import workerSrc from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
+import workerSrc from './pdf.worker?worker&url';
+import { installPdfJsCompatibility } from './compat';
 import { itemsToLines } from './layout';
 import { looksScanned } from './text';
 
-pdfjs.GlobalWorkerOptions.workerSrc = workerSrc;
+installPdfJsCompatibility();
+
+type PdfModule = typeof import('pdfjs-dist/legacy/build/pdf.mjs');
+type PdfDocumentProxy = Awaited<ReturnType<PdfModule['getDocument']>['promise']>;
+
+let pdfjsPromise: Promise<PdfModule> | null = null;
+function loadPdfJs() {
+  pdfjsPromise ??= import('pdfjs-dist/legacy/build/pdf.mjs');
+  return pdfjsPromise;
+}
 
 export interface ExtractedPdf {
   fileName: string;
@@ -21,10 +30,12 @@ export interface ExtractedPdf {
 
 export class PdfReadError extends Error {
   readonly code: 'password' | 'invalid' | 'not-pdf' | 'too-large' | 'unknown';
-  constructor(code: PdfReadError['code'], message: string) {
+  readonly cause?: Error;
+  constructor(code: PdfReadError['code'], message: string, cause?: Error) {
     super(message);
     this.name = 'PdfReadError';
     this.code = code;
+    this.cause = cause;
   }
 }
 
@@ -43,7 +54,9 @@ export async function readPdfFile(
   }
 
   const data = new Uint8Array(await file.arrayBuffer());
-  let doc: pdfjs.PDFDocumentProxy;
+  const pdfjs = await loadPdfJs();
+  pdfjs.GlobalWorkerOptions.workerSrc = workerSrc;
+  let doc: PdfDocumentProxy;
   try {
     doc = await pdfjs.getDocument({
       data,
@@ -51,14 +64,22 @@ export async function readPdfFile(
       useSystemFonts: false,
     }).promise;
   } catch (err) {
-    const name = (err as { name?: string })?.name ?? '';
-    if (name === 'PasswordException') {
-      throw new PdfReadError('password', '这个 PDF 有密码保护，请先解密或另存为无密码版本。');
+    const original = err instanceof Error ? err : new Error(String(err));
+    console.error('[pdf] PDF.js 打开失败', original);
+    if (original.name === 'PasswordException') {
+      throw new PdfReadError('password', '这个 PDF 有密码保护，请先解密或另存为无密码版本。', original);
     }
-    if (name === 'InvalidPDFException') {
-      throw new PdfReadError('invalid', 'PDF 文件已损坏或格式不正确。');
+    if (original.name === 'InvalidPDFException') {
+      throw new PdfReadError('invalid', 'PDF 文件已损坏或格式不正确。', original);
     }
-    throw new PdfReadError('unknown', `PDF 打开失败：${(err as Error).message ?? '未知错误'}`);
+    throw new PdfReadError('unknown', `PDF 打开失败：${original.message || '未知错误'}`, original);
+  }
+
+  if (
+    typeof doc.numPages !== 'number' ||
+    typeof doc.getPage !== 'function'
+  ) {
+    throw new PdfReadError('invalid', 'PDF 文字结构不完整，无法读取页面。');
   }
 
   const pages: string[] = [];
@@ -78,9 +99,13 @@ export async function readPdfFile(
       page.cleanup();
       onProgress?.(i / doc.numPages);
     }
+  } catch (err) {
+    const original = err instanceof Error ? err : new Error(String(err));
+    console.error('[pdf] PDF.js 读取文字失败', original);
+    throw new PdfReadError('unknown', `PDF 文字读取失败：${original.message || '未知错误'}`, original);
   } finally {
     const destroy = (doc as unknown as { destroy?: () => Promise<void> }).destroy;
-    if (destroy) void destroy.call(doc);
+    if (typeof destroy === 'function') void destroy.call(doc);
   }
 
   const text = pages.join('\n');
