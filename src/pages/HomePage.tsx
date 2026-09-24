@@ -50,12 +50,12 @@ function pickTodayPlan(plans: TrainingPlan[], today: ISODate): TrainingPlan | nu
   if (todayPlans.length) return todayPlans[todayPlans.length - 1];
 
   const upcoming = active
-    .filter((p) => p.date != null && dayDiff(p.date, today) < 0)
+    .filter((p) => p.date != null && dayDiff(p.date, today) > 0)
     .sort((a, b) => (a.date! < b.date! ? -1 : 1));
   if (upcoming.length) return upcoming[0];
 
   const past = active
-    .filter((p) => p.date != null)
+    .filter((p) => p.date != null && dayDiff(p.date, today) < 0)
     .sort((a, b) => (a.date! < b.date! ? 1 : -1));
   return past[0] ?? active[0] ?? null;
 }

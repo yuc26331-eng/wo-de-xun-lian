@@ -328,6 +328,8 @@ const waitStep = async (n) => {
 };
 
 // 第 1 步：训练
+const trainingMore = page.getByTestId('wizard-training-more');
+if (await trainingMore.isVisible().catch(() => false)) await trainingMore.click();
 await page.getByTestId('wizard-training-items').fill('现场验收：下肢力量');
 await page.getByTestId('wizard-next').click();
 // 第 2 步：真实 OCR 识别截图

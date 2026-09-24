@@ -33,12 +33,18 @@ export type DataSource = 'manual' | 'pdf' | 'template' | 'sample';
 
 /** 一个动作/一项训练的目标要求 */
 export interface TargetSpec {
-  /** 目标组数 */
+  /** 目标组数（范围时保存上限，供训练流程使用） */
   sets?: number | null;
+  /** 原始组数文本，例如 '2-3'，用于导入确认时保留范围 */
+  setsText?: string | null;
   /** 次数，可能是区间，如 '8-12' */
   reps?: string | null;
   /** 建议重量（kg） */
   weightKg?: number | null;
+  /** 原始时长文本，例如 '25-35秒/侧' */
+  durationText?: string | null;
+  /** 时长是否按每侧计算 */
+  durationPerSide?: boolean;
   /** 无法转成数字的重量描述，如 '空杆'、'60% 1RM' */
   weightText?: string | null;
   /** 组间休息（秒） */

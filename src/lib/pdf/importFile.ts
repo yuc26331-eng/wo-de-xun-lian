@@ -4,7 +4,7 @@
  */
 import type { PdfImportRecord } from '../../types';
 import { nowISO, uid } from '../format';
-import { classifyPdf } from './classify';
+import { classifyPdf, looksLikePlanDocumentTitle } from './classify';
 import { buildDraft } from './buildDraft';
 import { saveDraftToSession, type AnyDraft } from './draft';
 import { readPdfFile } from './readPdf';
@@ -16,6 +16,8 @@ export interface ImportOutcome {
 }
 
 export interface ImportOptions {
+  /** 入口意图：计划入口可把旧的误分类记录重新按计划解析 */
+  intent?: 'auto' | 'plan';
   /** 解析进度 0~1 */
   onProgress?: (ratio: number) => void;
   /** 保存原始记录（含每页文字）到 IndexedDB */
@@ -27,6 +29,10 @@ export async function importPdfFile(file: File, opts: ImportOptions = {}): Promi
   const classification = extracted.ocrRequired
     ? { kind: 'unknown' as const, confidence: 0 }
     : classifyPdf(extracted.text, extracted.fileName);
+  const forcePlan =
+    opts.intent === 'plan' && looksLikePlanDocumentTitle(extracted.text, extracted.fileName);
+  const effectiveKind =
+    forcePlan && classification.kind !== 'weekly-plan' ? ('plan' as const) : classification.kind;
 
   const record: PdfImportRecord = {
     id: uid('pdf'),
@@ -34,7 +40,7 @@ export async function importPdfFile(file: File, opts: ImportOptions = {}): Promi
     fileSize: extracted.fileSize,
     pageCount: extracted.pageCount,
     importedAt: nowISO(),
-    kind: classification.kind,
+    kind: effectiveKind,
     pages: extracted.pages,
     text: extracted.text,
     ocrRequired: extracted.ocrRequired,

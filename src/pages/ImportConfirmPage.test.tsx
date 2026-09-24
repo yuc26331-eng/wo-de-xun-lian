@@ -11,16 +11,16 @@ import { AppDataProvider } from '../state/AppData';
 import { ToastProvider } from '../components/ui';
 import { DB_NAME, dbGetAll, dbPut, getDB } from '../db/db';
 import { DRAFT_KEY, saveDraftToSession } from '../lib/pdf/draft';
-import { parsePlanText } from '../lib/pdf/parsePlan';
+import { parsePlanText, parseWeeklyPlanBody } from '../lib/pdf/parsePlan';
 import { parseSummaryText } from '../lib/pdf/parseSummary';
-import { PLAN_TEXT, SUMMARY_TEXT } from '../lib/pdf/fixtures';
+import { PLAN_TEXT, SUMMARY_TEXT, WEEKLY_TEXT } from '../lib/pdf/fixtures';
 import type { DailyLog } from '../types';
 
-function renderPage() {
+function renderPage(entry = '/import/confirm') {
   return render(
     <AppDataProvider>
       <ToastProvider>
-        <MemoryRouter initialEntries={['/import/confirm']}>
+        <MemoryRouter initialEntries={[entry]}>
           <ImportConfirmPage />
         </MemoryRouter>
       </ToastProvider>
@@ -69,6 +69,218 @@ describe('ImportConfirmPage - 健身计划', () => {
     });
     // 草稿已清除，避免重复导入
     expect(sessionStorage.getItem(DRAFT_KEY)).toBeNull();
+  });
+
+  it('时间型动作在确认页显示时长而不是次数，并保留范围', async () => {
+    const draft = parsePlanText(
+      `计时核心训练
+日期：2026-09-15
+正式训练
+1. 哥本哈根侧桥
+2-3组 × 25-35秒/侧`,
+      { importId: 'imp-timed', fileName: '计时核心训练.pdf' },
+    );
+    saveDraftToSession(draft);
+    const user = userEvent.setup();
+    renderPage();
+
+    const duration = await screen.findByTestId('ex-duration-0');
+    expect((duration as HTMLInputElement).value).toBe('25-35秒/侧');
+    expect(screen.queryByTestId('ex-reps-0')).toBeNull();
+
+    await user.clear(duration);
+    await user.type(duration, '30');
+    await user.click(screen.getByRole('button', { name: /确认保存计划/ }));
+
+    await waitFor(async () => {
+      const plans = await dbGetAll('plans');
+      const saved = plans.find((p) => p.title === '计时核心训练');
+      expect(saved?.exercises[0].target.durationText).toBe('30秒/侧');
+      expect(saved?.exercises[0].target.durationSec).toBe(30);
+      expect(saved?.exercises[0].target.durationPerSide).toBe(true);
+      expect(saved?.exercises[0].target.reps).toBeNull();
+    });
+  });
+
+  it.each([
+    ['30', '30秒/侧'],
+    ['30秒', '30秒/侧'],
+    ['30秒/侧', '30秒/侧'],
+  ])('另存一份计划输入 %s 时复用时长校验并保存为 %s', async (input, expected) => {
+    const draft = parsePlanText(
+      `计时核心训练
+日期：2026-09-15
+1. 哥本哈根侧桥
+2-3组 × 25-35秒/侧`,
+      { importId: `imp-template-${input}`, fileName: '计时核心训练.pdf' },
+    );
+    saveDraftToSession(draft);
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.clear(await screen.findByTestId('ex-duration-0'));
+    await user.type(screen.getByTestId('ex-duration-0'), input);
+    await user.click(screen.getByRole('button', { name: /另存一份计划/ }));
+
+    await waitFor(async () => {
+      const saved = (await dbGetAll('plans')).find((plan) => plan.title === '计时核心训练（模板）');
+      expect(saved?.exercises[0].target.durationText).toBe(expected);
+      expect(saved?.exercises[0].target.durationSec).toBe(30);
+      expect(saved?.exercises[0].target.durationPerSide).toBe(true);
+      expect(saved?.exercises[0].target.reps).toBeNull();
+    });
+  });
+
+  it('另存一份计划在时长清空或误填“次”时阻止保存', async () => {
+    const draft = parsePlanText(
+      `计时核心训练
+日期：2026-09-15
+1. 哥本哈根侧桥
+2-3组 × 25-35秒/侧`,
+      { importId: 'imp-template-invalid', fileName: '计时核心训练.pdf' },
+    );
+    saveDraftToSession(draft);
+    const user = userEvent.setup();
+    renderPage();
+
+    const duration = await screen.findByTestId('ex-duration-0');
+    await user.clear(duration);
+    await user.click(screen.getByRole('button', { name: /另存一份计划/ }));
+    await screen.findByText(/时长不能为空/);
+    expect((await dbGetAll('plans')).some((plan) => plan.title === '计时核心训练（模板）')).toBe(false);
+
+    await user.type(duration, '30次');
+    await user.click(screen.getByRole('button', { name: /另存一份计划/ }));
+    await screen.findByText(/不要填写“次”/);
+    expect((await dbGetAll('plans')).some((plan) => plan.title === '计时核心训练（模板）')).toBe(false);
+  });
+
+  it('时长清空或误填“次”时提示无效，不保存旧的 35 秒', async () => {
+    const draft = parsePlanText(
+      `计时核心训练
+日期：2026-09-15
+1. 哥本哈根侧桥
+2-3组 × 25-35秒/侧`,
+      { importId: 'imp-invalid-duration', fileName: '计时核心训练.pdf' },
+    );
+    saveDraftToSession(draft);
+    const user = userEvent.setup();
+    renderPage();
+
+    const duration = await screen.findByTestId('ex-duration-0');
+    await user.clear(duration);
+    await user.click(screen.getByRole('button', { name: /确认保存计划/ }));
+    await screen.findByText(/时长不能为空/);
+    expect((await dbGetAll('plans')).some((plan) => plan.title === '计时核心训练')).toBe(false);
+
+    await user.type(duration, '30次');
+    await user.click(screen.getByRole('button', { name: /确认保存计划/ }));
+    await screen.findByText(/不要填写“次”/);
+    expect((await dbGetAll('plans')).some((plan) => plan.title === '计时核心训练')).toBe(false);
+  });
+
+  it('查看已保存的旧结果不会自动新建，只有“复制为新计划”才创建副本', async () => {
+    const now = '2026-09-15T00:00:00.000Z';
+    const draft = parsePlanText(PLAN_TEXT, {
+      importId: 'saved-plan-import',
+      fileName: '下肢力量.pdf',
+    });
+    saveDraftToSession(draft);
+    await dbPut('plans', {
+      id: 'old-plan',
+      title: '已经保存过的计划',
+      date: '2026-09-15',
+      kind: 'strength',
+      source: 'pdf',
+      warmup: [],
+      exercises: [],
+      createdAt: now,
+      updatedAt: now,
+    });
+    await dbPut('pdfImports', {
+      id: 'saved-plan-import',
+      fileName: '下肢力量.pdf',
+      fileSize: 1000,
+      pageCount: 1,
+      importedAt: now,
+      kind: 'plan',
+      pages: [],
+      text: PLAN_TEXT,
+      ocrRequired: false,
+      saved: true,
+      planId: 'old-plan',
+    });
+
+    const user = userEvent.setup();
+    renderPage('/import/confirm?import=saved-plan-import');
+    await screen.findByText(/这是上次已保存的导入结果/);
+    expect(screen.queryByRole('button', { name: /确认保存计划/ })).toBeNull();
+    expect(screen.queryByRole('button', { name: /另存一份计划/ })).toBeNull();
+
+    await user.click(screen.getByRole('button', { name: /复制为新计划/ }));
+    await waitFor(async () => {
+      const plans = await dbGetAll('plans');
+      expect(plans).toHaveLength(2);
+      const imports = await dbGetAll('pdfImports');
+      expect(imports.find((row) => row.id === 'saved-plan-import')?.planId).toBe('old-plan');
+    });
+  });
+});
+
+describe('ImportConfirmPage - 周计划复查', () => {
+  it('已保存周计划默认只读，显式复制后新增计划且保留旧 planId', async () => {
+    const now = '2026-09-15T00:00:00.000Z';
+    const { days, warnings } = parseWeeklyPlanBody(WEEKLY_TEXT, {
+      importId: 'saved-week-import',
+      fileName: '周计划.pdf',
+    });
+    const draft = {
+      kind: 'weekly-plan' as const,
+      importId: 'saved-week-import',
+      fileName: '周计划.pdf',
+      days,
+      warnings,
+    };
+    saveDraftToSession(draft);
+    await dbPut('plans', {
+      id: 'old-week-plan',
+      title: '旧周计划第一天',
+      date: '2026-09-14',
+      kind: 'strength',
+      source: 'pdf',
+      warmup: [],
+      exercises: [],
+      createdAt: now,
+      updatedAt: now,
+    });
+    await dbPut('pdfImports', {
+      id: 'saved-week-import',
+      fileName: '周计划.pdf',
+      fileSize: 2000,
+      pageCount: 1,
+      importedAt: now,
+      kind: 'weekly-plan',
+      pages: [],
+      text: WEEKLY_TEXT,
+      ocrRequired: false,
+      saved: true,
+      planId: 'old-week-plan',
+    });
+
+    const user = userEvent.setup();
+    renderPage('/import/confirm?import=saved-week-import');
+    await screen.findByText(/这是上次已保存的导入结果/);
+    expect(screen.queryByRole('button', { name: /保存所选/ })).toBeNull();
+    expect(screen.getByRole('button', { name: /复制为新周计划/ })).toBeTruthy();
+
+    await user.click(screen.getByRole('button', { name: /复制为新周计划/ }));
+    await waitFor(async () => {
+      const plans = await dbGetAll('plans');
+      expect(plans.length).toBeGreaterThan(1);
+      expect(plans.some((plan) => plan.id === 'old-week-plan')).toBe(true);
+      const imports = await dbGetAll('pdfImports');
+      expect(imports.find((row) => row.id === 'saved-week-import')?.planId).toBe('old-week-plan');
+    });
   });
 });
 

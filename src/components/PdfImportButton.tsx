@@ -7,12 +7,15 @@
 import { useRef, useState, type DragEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { PdfReadError } from '../lib/pdf/importFile';
+import { looksLikePlanDocumentTitle } from '../lib/pdf/classify';
+import { clearDraftFromSession, findSavedImportForIntent } from '../lib/pdf/draft';
 import { useAppData } from '../state/AppData';
 import { Button, Sheet, useToast } from './ui';
 import { IconImport } from './icons';
 
 type Variant = 'primary' | 'default' | 'ghost';
 type Size = 'sm' | 'md' | 'lg' | 'xl';
+type ImportIntent = 'auto' | 'plan';
 
 /** PDF 解析库（pdf.js）体积较大，只在用户真的要导入时按需加载 */
 async function loadPdfLib() {
@@ -41,10 +44,10 @@ function messageFor(err: unknown): string {
  * 统一的导入流程：读文件 → 解析 → 保存原始记录 → 跳转导入确认页
  * 返回 true 表示流程已经接管（成功或失败都会给出提示）
  */
-function usePdfImporter() {
+function usePdfImporter(intent: ImportIntent = 'auto') {
   const navigate = useNavigate();
   const toast = useToast();
-  const { savePdfImport, pdfImports } = useAppData();
+  const { savePdfImport, pdfImports, deletePdfImport } = useAppData();
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState(0);
   const [error, setError] = useState<string | null>(null);
@@ -56,16 +59,33 @@ function usePdfImporter() {
     setProgress(0);
     setError(null);
     try {
-      const { importPdfFile, isAlreadySaved } = await loadPdfLib();
-      if (isAlreadySaved(pdfImports, file.name, file.size)) {
-        const previous = pdfImports.find((r) => r.saved && r.fileName === file.name);
-        setDuplicate({ id: previous?.id ?? '', name: file.name });
+      const { importPdfFile } = await loadPdfLib();
+      const previous = findSavedImportForIntent(pdfImports, file.name, file.size, intent);
+      if (previous) {
+        setDuplicate({ id: previous.id, name: file.name });
         return;
       }
+      if (intent === 'plan') clearDraftFromSession();
       const outcome = await importPdfFile(file, {
+        intent,
         onProgress: (ratio) => setProgress(ratio),
         save: savePdfImport,
       });
+      if (intent === 'plan' && !outcome.record.ocrRequired) {
+        const explicitPlan = looksLikePlanDocumentTitle(
+          outcome.record.text,
+          outcome.record.fileName,
+        );
+        const hasPlanStructure =
+          (outcome.draft.kind === 'plan' && outcome.draft.exercises.length >= 2) ||
+          (outcome.draft.kind === 'weekly-plan' && outcome.draft.days.length > 0);
+        if (!explicitPlan && !hasPlanStructure) {
+          await deletePdfImport(outcome.record.id);
+          clearDraftFromSession();
+          toast('这份 PDF 更像分析报告，请改用「导入分析报告」入口', 'error');
+          return;
+        }
+      }
       if (outcome.record.ocrRequired) {
         toast('这是扫描版 PDF，需要 OCR 才能识别文字', 'error');
       } else {
@@ -92,6 +112,7 @@ export function PdfImportButton({
   label = '导入 ChatGPT PDF',
   className,
   testId,
+  intent = 'auto',
 }: {
   variant?: Variant;
   size?: Size;
@@ -99,9 +120,10 @@ export function PdfImportButton({
   label?: string;
   className?: string;
   testId?: string;
+  intent?: ImportIntent;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
-  const importer = usePdfImporter();
+  const importer = usePdfImporter(intent);
 
   return (
     /* 容器上带 testId，e2e 用 `[data-testid="import-pdf"] input[type=file]` 直接塞文件 */

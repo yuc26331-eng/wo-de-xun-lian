@@ -1,7 +1,12 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { parseSummaryText } from './parseSummary';
 import { parseBodyReportText, bodyEntriesToMetrics } from './parseBodyReport';
 import { BODY_TEXT, SUMMARY_TEXT } from './fixtures';
+
+afterEach(() => {
+  vi.useRealTimers();
+  vi.unstubAllEnvs();
+});
 
 describe('parseSummaryText', () => {
   const draft = parseSummaryText(SUMMARY_TEXT, { importId: 'imp-s1', fileName: '今日总结.pdf' });
@@ -35,6 +40,19 @@ describe('parseSummaryText', () => {
   it('置信度较高且没有关键警告', () => {
     expect(draft.confidence).toBeGreaterThan(0.6);
     expect(draft.warnings.filter((w) => w.includes('未识别到训练内容'))).toHaveLength(0);
+  });
+
+  it('未识别到日期时按本地日期回退，不使用 UTC 日期', () => {
+    vi.stubEnv('TZ', 'Asia/Shanghai');
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-09-15T16:30:00.000Z'));
+
+    const withoutDate = parseSummaryText('训练内容：深蹲 3 组', {
+      importId: 'imp-local-date',
+      fileName: '今日总结.pdf',
+    });
+
+    expect(withoutDate.date).toBe('2026-09-16');
   });
 });
 

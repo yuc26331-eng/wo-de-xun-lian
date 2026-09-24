@@ -1,5 +1,6 @@
 /** 今日训练总结解析：PDF 文本 -> SummaryDraft */
 import type { SummaryDraft } from '../../types';
+import { toISODate } from '../format';
 import { cleanLines, firstNumber, matchLabel, normalizeText, parseDateLoose } from './text';
 
 function findLabelValue(lines: string[], labels: string[], mode: 'value' | 'rest' = 'rest'): string | null {
@@ -54,7 +55,7 @@ export function parseSummaryText(
     lines.map((l) => parseDateLoose(l)).find((d) => d) ??
     parseDateLoose(opts.fileName ?? '') ??
     opts.today ??
-    new Date().toISOString().slice(0, 10);
+    toISODate();
 
   const weightKg =
     numberFrom(lines, ['体重', '今日体重', '晨重', '净重']) ??

@@ -3,14 +3,14 @@ import { useEffect, useState } from 'react';
 import { Button, Card, Chip, useToast } from './ui';
 import { phaseLabel, useUpdater } from '../lib/update/useUpdater';
 import { consumeUpdateSuccess, isStandalone } from '../lib/update/updater';
-import { formatDateCN } from '../lib/format';
+import { formatDateCN, toISODate } from '../lib/format';
 
 function formatTime(iso: string | null): string {
   if (!iso) return '还没有检查过';
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return '—';
   const pad = (n: number) => `${n}`.padStart(2, '0');
-  return `${formatDateCN(d.toISOString().slice(0, 10))} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  return `${formatDateCN(toISODate(d))} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
 export function UpdatePanel() {

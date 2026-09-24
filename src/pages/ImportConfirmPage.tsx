@@ -33,6 +33,7 @@ import {
   type TrainingPlan,
 } from '../types';
 import { formatDateCN, formatNumber, toISODate, uid } from '../lib/format';
+import { normalizeText, parseDurationSec } from '../lib/pdf/text';
 import {
   buildDraft,
   bodyEntriesToMetrics,
@@ -55,7 +56,7 @@ function ConfidenceBar({ value }: { value: number }) {
   const pct = Math.round(value * 100);
   return (
     <div className="confidence">
-      <span className="tiny muted nowrap">识别完整度</span>
+      <span className="tiny muted nowrap">解析可信度</span>
       <Bar value={value} tone={value > 0.6 ? 'green' : undefined} />
       <span className="tiny muted nowrap">{pct}%</span>
     </div>
@@ -66,7 +67,7 @@ function Warnings({ items }: { items: string[] }) {
   if (!items.length) return null;
   return (
     <div className="warn-box">
-      <div className="strong small">请注意</div>
+      <div className="strong small">需要核对</div>
       <ul>
         {items.map((w) => (
           <li key={w}>{w}</li>
@@ -78,7 +79,65 @@ function Warnings({ items }: { items: string[] }) {
 
 /* ------------------------------------------------------------- 计划确认 */
 
-function PlanConfirm({ draft: initial }: { draft: PlanDraft }) {
+interface DurationInputResult {
+  durationSec: number | null;
+  normalized: string;
+  error: string | null;
+}
+
+function isTimedTarget(target: PlanDraft['exercises'][number]['target']): boolean {
+  return target.durationSec != null || target.durationText != null;
+}
+
+function parseDurationEditorValue(value: string, perSide: boolean): DurationInputResult {
+  const text = normalizeText(value).trim();
+  const suffix = perSide ? '/侧' : '';
+  if (!text) {
+    return { durationSec: null, normalized: '', error: '时长不能为空，请填写秒数或时间范围。' };
+  }
+
+  const single = text.match(/^(\d+(?:\.\d+)?)$/);
+  if (single) {
+    const sec = Number(single[1]);
+    if (sec > 0) {
+      return { durationSec: sec, normalized: `${single[1]}秒${suffix}`, error: null };
+    }
+  }
+
+  const bareRange = text.match(/^(\d+(?:\.\d+)?)\s*[-~到至]\s*(\d+(?:\.\d+)?)$/);
+  if (bareRange) {
+    const min = Number(bareRange[1]);
+    const max = Number(bareRange[2]);
+    if (min > 0 && max >= min) {
+      return {
+        durationSec: max,
+        normalized: `${bareRange[1]}-${bareRange[2]}秒${suffix}`,
+        error: null,
+      };
+    }
+  }
+
+  const sec = parseDurationSec(text);
+  if (sec != null && sec > 0 && /(?:秒|分钟|分|min|s\b)/i.test(text)) {
+    const base = text.replace(/\s*\/\s*侧\s*$/, '').trim();
+    const normalized = perSide && !/\/侧$/.test(base) ? `${base}/侧` : text;
+    return { durationSec: sec, normalized, error: null };
+  }
+
+  return {
+    durationSec: null,
+    normalized: text,
+    error: '请输入秒数、分钟数或时间范围，例如 30、30秒或 25-35秒/侧。不要填写“次”。',
+  };
+}
+
+function PlanConfirm({
+  draft: initial,
+  savedRecord,
+}: {
+  draft: PlanDraft;
+  savedRecord?: { planId?: string | null } | null;
+}) {
   const [draft, setDraft] = useState(initial);
   const [saving, setSaving] = useState(false);
   const [askDiscard, setAskDiscard] = useState(false);
@@ -115,21 +174,60 @@ function PlanConfirm({ draft: initial }: { draft: PlanDraft }) {
       ],
     });
 
-  const save = async () => {
+  const normalizeDurationTargets = (): PlanDraft | null => {
+    let invalidIndex = -1;
+    let invalidMessage = '';
+    const exercises = draft.exercises.map((ex) => {
+      if (!isTimedTarget(ex.target)) return ex;
+      const perSide = ex.target.durationPerSide ?? ex.target.durationText?.includes('/侧') ?? false;
+      const rawDuration =
+        ex.target.durationText ??
+        (ex.target.durationSec != null ? `${ex.target.durationSec}秒` : '');
+      const parsed = parseDurationEditorValue(rawDuration, perSide);
+      if (parsed.error && invalidIndex < 0) {
+        invalidIndex = ex.order;
+        invalidMessage = parsed.error;
+      }
+      return {
+        ...ex,
+        target: {
+          ...ex.target,
+          durationSec: parsed.durationSec,
+          durationText: parsed.normalized,
+          reps: null,
+        },
+      };
+    });
+    if (invalidIndex >= 0) {
+      toast(`第 ${invalidIndex + 1} 个动作的时长无效：${invalidMessage}`, 'error');
+      return null;
+    }
+    return { ...draft, exercises };
+  };
+
+  const save = async (copySaved = false) => {
+    if (savedRecord && !copySaved) {
+      toast('这是上次已保存的导入结果，请点击「复制为新计划」明确创建副本', 'error');
+      return;
+    }
     if (draft.exercises.length === 0) {
       toast('至少需要一个动作，或改用「手动新建计划」', 'error');
       return;
     }
+    const normalized = normalizeDurationTargets();
+    if (!normalized) return;
     setSaving(true);
     try {
       const plan: TrainingPlan = await createPlanFromDraft({
-        ...draft,
-        title: draft.title.trim() || '导入的训练计划',
-        exercises: draft.exercises.map((e, i) => ({ ...e, order: i })),
+        ...normalized,
+        title: normalized.title.trim() || '导入的训练计划',
+        exercises: normalized.exercises.map((e, i) => ({ ...e, order: i })),
       });
-      await markPdfImportSaved(draft.importId, { planId: plan.id, kind: 'plan' });
+      if (!copySaved) {
+        await markPdfImportSaved(draft.importId, { planId: plan.id, kind: 'plan' });
+      }
       clearDraftFromSession();
-      toast('已保存为新的训练计划，可以开始训练了', 'success');
+      toast(copySaved ? '已复制为新的训练计划' : '已保存为新的训练计划，可以开始训练了', 'success');
       navigate('/');
     } catch (err) {
       toast(`保存失败：${err instanceof Error ? err.message : '未知错误'}`, 'error');
@@ -138,11 +236,23 @@ function PlanConfirm({ draft: initial }: { draft: PlanDraft }) {
     }
   };
 
-  /** 存成模板，方便以后重复使用 */
+  /** 另存一份：与确认保存、旧结果复制共用同一套时长校验与归一化。 */
   const saveAsTemplate = async () => {
-    const plan = await createPlanFromDraft({ ...draft, title: `${draft.title}（模板）` });
-    await savePlan(plan);
-    toast('已同时保存一份到训练计划列表', 'success');
+    const normalized = normalizeDurationTargets();
+    if (!normalized) return;
+    setSaving(true);
+    try {
+      const plan = await createPlanFromDraft({
+        ...normalized,
+        title: `${normalized.title}（模板）`,
+      });
+      await savePlan(plan);
+      toast('已另存一份到训练计划列表', 'success');
+    } catch (err) {
+      toast(`保存失败：${err instanceof Error ? err.message : '未知错误'}`, 'error');
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -156,6 +266,15 @@ function PlanConfirm({ draft: initial }: { draft: PlanDraft }) {
         </button>
       }
     >
+      {savedRecord && (
+        <Card>
+          <div className="strong" style={{ marginBottom: 6 }}>这是上次已保存的导入结果</div>
+          <div className="tiny muted" style={{ lineHeight: 1.7 }}>
+            为避免重复计划，再次进入这里不会自动保存原记录。只有点击「复制为新计划」时才会创建一份新的训练计划。
+          </div>
+        </Card>
+      )}
+
       <Card>
         <div className="import-meta">
           <Chip tone="accent">健身计划</Chip>
@@ -284,17 +403,69 @@ function PlanConfirm({ draft: initial }: { draft: PlanDraft }) {
                 value={ex.target.sets ?? null}
                 dec={0}
                 testId={`ex-sets-${i}`}
-                onChange={(v) => patchEx(ex.id, { target: { ...ex.target, sets: v } })}
+                onChange={(v) => patchEx(ex.id, { target: { ...ex.target, sets: v, setsText: null } })}
               />
+              {ex.target.setsText && (
+                <div className="tiny muted" style={{ marginTop: 4 }}>
+                  原文为 {ex.target.setsText} 组，训练流程按上限 {ex.target.sets ?? '-'} 组保存
+                </div>
+              )}
             </Field>
-            <Field label="次数">
-              <TextInput
-                value={ex.target.reps ?? ''}
-                testId={`ex-reps-${i}`}
-                onChange={(v) => patchEx(ex.id, { target: { ...ex.target, reps: v } })}
-                placeholder="8-12"
-              />
-            </Field>
+            {isTimedTarget(ex.target) ? (
+              <Field
+                  label={
+                    (ex.target.durationPerSide ?? ex.target.durationText?.includes('/侧'))
+                      ? '时长（每侧）'
+                      : '时长'
+                  }
+                >
+                <TextInput
+                  value={
+                    ex.target.durationText ??
+                    (ex.target.durationSec != null ? `${ex.target.durationSec}秒` : '')
+                  }
+                  testId={`ex-duration-${i}`}
+                  onChange={(v) => {
+                    const perSide =
+                      ex.target.durationPerSide ||
+                      /\/\s*侧/.test(v) ||
+                      Boolean(ex.target.durationText?.includes('/侧'));
+                    const parsed = parseDurationEditorValue(v, perSide);
+                    patchEx(ex.id, {
+                      target: {
+                        ...ex.target,
+                        durationText: v,
+                        durationSec: parsed.durationSec,
+                        durationPerSide: perSide,
+                        reps: null,
+                      },
+                    });
+                  }}
+                  placeholder="25-35秒/侧"
+                />
+                {(() => {
+                  const perSide = ex.target.durationPerSide ?? ex.target.durationText?.includes('/侧') ?? false;
+                  const rawDuration =
+                    ex.target.durationText ??
+                    (ex.target.durationSec != null ? `${ex.target.durationSec}秒` : '');
+                  const parsed = parseDurationEditorValue(rawDuration, perSide);
+                  return parsed.error ? (
+                    <div className="tiny" style={{ color: '#c62828', marginTop: 4 }}>
+                      {parsed.error}
+                    </div>
+                  ) : null;
+                })()}
+              </Field>
+            ) : (
+              <Field label="次数">
+                <TextInput
+                  value={ex.target.reps ?? ''}
+                  testId={`ex-reps-${i}`}
+                  onChange={(v) => patchEx(ex.id, { target: { ...ex.target, reps: v } })}
+                  placeholder="8-12"
+                />
+              </Field>
+            )}
             <Field label="重量 kg">
               <NumberInput
                 value={ex.target.weightKg ?? null}
@@ -360,14 +531,16 @@ function PlanConfirm({ draft: initial }: { draft: PlanDraft }) {
       </Card>
 
       <div className="sticky-actions">
-        <Button block size="xl" variant="primary" disabled={saving} onClick={() => void save()}>
+        <Button block size="xl" variant="primary" disabled={saving} onClick={() => void save(savedRecord != null)}>
           <IconCheck width={20} height={20} />
-          {saving ? '正在保存计划…' : '确认保存计划'}
+          {saving ? (savedRecord ? '正在复制计划…' : '正在保存计划…') : savedRecord ? '复制为新计划' : '确认保存计划'}
         </Button>
         <div className="row" style={{ gap: 10, marginTop: 8 }}>
-          <Button block size="lg" onClick={() => void saveAsTemplate()} disabled={saving}>
-            另存一份计划
-          </Button>
+          {!savedRecord && (
+            <Button block size="lg" onClick={() => void saveAsTemplate()} disabled={saving}>
+              另存一份计划
+            </Button>
+          )}
           <Button block size="lg" variant="ghost" onClick={() => setAskDiscard(true)}>
             放弃
           </Button>
@@ -741,14 +914,24 @@ function BodyConfirm({ draft }: { draft: BodyDraft }) {
 
 /* ------------------------------------------------------------- 周计划确认 */
 
-function WeeklyConfirm({ draft }: { draft: WeeklyDraft }) {
+function WeeklyConfirm({
+  draft,
+  savedRecord,
+}: {
+  draft: WeeklyDraft;
+  savedRecord?: { planId?: string | null } | null;
+}) {
   const [selected, setSelected] = useState<boolean[]>(() => draft.days.map(() => true));
   const [saving, setSaving] = useState(false);
   const { createPlanFromDraft, markPdfImportSaved } = useAppData();
   const toast = useToast();
   const navigate = useNavigate();
 
-  const save = async () => {
+  const save = async (copySaved = false) => {
+    if (savedRecord && !copySaved) {
+      toast('这是上次已保存的周计划，请点击「复制为新周计划」明确创建副本', 'error');
+      return;
+    }
     const days = draft.days.filter((_, i) => selected[i]);
     if (!days.length) {
       toast('请至少选择一天', 'error');
@@ -761,9 +944,14 @@ function WeeklyConfirm({ draft }: { draft: WeeklyDraft }) {
         const plan = await createPlanFromDraft(day);
         firstId = firstId ?? plan.id;
       }
-      await markPdfImportSaved(draft.importId, { planId: firstId, kind: 'weekly-plan' });
+      if (!copySaved) {
+        await markPdfImportSaved(draft.importId, { planId: firstId, kind: 'weekly-plan' });
+      }
       clearDraftFromSession();
-      toast(`已保存 ${days.length} 天的训练安排`, 'success');
+      toast(
+        copySaved ? `已复制 ${days.length} 天的训练安排` : `已保存 ${days.length} 天的训练安排`,
+        'success',
+      );
       navigate('/train');
     } catch (err) {
       toast(`保存失败：${err instanceof Error ? err.message : '未知错误'}`, 'error');
@@ -774,6 +962,15 @@ function WeeklyConfirm({ draft }: { draft: WeeklyDraft }) {
 
   return (
     <Page title="确认周计划" sub={`${draft.fileName} · ${draft.days.length} 天`} back>
+      {savedRecord && (
+        <Card>
+          <div className="strong" style={{ marginBottom: 6 }}>这是上次已保存的导入结果</div>
+          <div className="tiny muted" style={{ lineHeight: 1.7 }}>
+            为避免重复计划，再次查看不会自动创建。只有点击「复制为新周计划」时才会新增所选的每日计划，原导入记录和原计划不会被修改。
+          </div>
+        </Card>
+      )}
+
       <Card>
         <div className="import-meta">
           <Chip tone="accent">周训练计划</Chip>
@@ -781,7 +978,9 @@ function WeeklyConfirm({ draft }: { draft: WeeklyDraft }) {
         </div>
         <Warnings items={draft.warnings} />
         <p className="tiny muted" style={{ marginBottom: 0 }}>
-          保存后会生成多份独立计划，每天各自保存，互不覆盖。
+          {savedRecord
+            ? '当前为已保存结果复查；如需再次使用，请明确点击下方复制按钮。'
+            : '保存后会生成多份独立计划，每天各自保存，互不覆盖。'}
         </p>
       </Card>
 
@@ -807,8 +1006,20 @@ function WeeklyConfirm({ draft }: { draft: WeeklyDraft }) {
       </div>
 
       <div className="sticky-actions">
-        <Button block size="xl" variant="primary" disabled={saving} onClick={() => void save()}>
-          {saving ? '正在保存…' : `保存所选 ${selected.filter(Boolean).length} 天`}
+        <Button
+          block
+          size="xl"
+          variant="primary"
+          disabled={saving}
+          onClick={() => void save(savedRecord != null)}
+        >
+          {saving
+            ? savedRecord
+              ? '正在复制…'
+              : '正在保存…'
+            : savedRecord
+              ? '复制为新周计划'
+              : `保存所选 ${selected.filter(Boolean).length} 天`}
         </Button>
       </div>
     </Page>
@@ -875,6 +1086,11 @@ export default function ImportConfirmPage() {
   const { pdfImports, ready } = useAppData();
   const navigate = useNavigate();
 
+  const savedRecord = useMemo(
+    () => (importId ? pdfImports.find((record) => record.id === importId && record.saved) ?? null : null),
+    [importId, pdfImports],
+  );
+
   // 优先级：sessionStorage 草稿 -> ?import=<id> 从 IndexedDB 记录重新解析
   const draft = useMemo(() => {
     const local = readDraftFromSession();
@@ -917,9 +1133,9 @@ export default function ImportConfirmPage() {
 
   switch (draft.kind) {
     case 'plan':
-      return <PlanConfirm draft={draft} />;
+      return <PlanConfirm draft={draft} savedRecord={savedRecord} />;
     case 'weekly-plan':
-      return <WeeklyConfirm draft={draft} />;
+      return <WeeklyConfirm draft={draft} savedRecord={savedRecord} />;
     case 'daily-summary':
       return <SummaryConfirm draft={draft} />;
     case 'body-report':

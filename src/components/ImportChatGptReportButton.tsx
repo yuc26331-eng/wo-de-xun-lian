@@ -1,6 +1,7 @@
-/** 「导入 ChatGPT 报告」按钮：本地解析 PDF 文字 → 进入预览确认页 */
+/** 「导入分析报告」按钮：本地解析 PDF 文字 → 进入分析报告预览确认页 */
 import { useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { classifyPdf, looksLikePlanDocumentTitle } from '../lib/pdf/classify';
 import { Button, useToast } from './ui';
 import { IconImport } from './icons';
 import {
@@ -13,7 +14,7 @@ export function ImportChatGptReportButton({
   variant = 'primary',
   size = 'lg',
   block,
-  label = '导入 ChatGPT 报告',
+  label = '导入分析报告 PDF',
   testId = 'import-chatgpt-report',
 }: {
   variant?: 'default' | 'primary' | 'ghost';
@@ -45,6 +46,14 @@ export function ImportChatGptReportButton({
         toast('这份 PDF 没有可提取文字（可能是扫描版/图片），需要 OCR 才能导入', 'error');
         return;
       }
+      const kind = classifyPdf(extracted.text, extracted.fileName).kind;
+      if (
+        (kind === 'plan' || kind === 'weekly-plan') &&
+        looksLikePlanDocumentTitle(extracted.text, extracted.fileName)
+      ) {
+        toast('这份 PDF 更像训练计划，请改用「导入训练计划」入口', 'error');
+        return;
+      }
       const draft = parseChatGptReportText(extracted.text, {
         fileName: extracted.fileName,
         fileSize: extracted.fileSize,
@@ -66,6 +75,7 @@ export function ImportChatGptReportButton({
     <div data-testid={testId}>
       <Button
         block={block}
+        data-testid={`${testId}-button`}
         variant={variant}
         size={size}
         disabled={busy}

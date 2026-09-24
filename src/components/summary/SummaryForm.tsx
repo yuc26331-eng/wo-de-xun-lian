@@ -119,15 +119,6 @@ export function SummaryForm({
   const dirty = useRef(false);
   const dateRef = useRef(date);
 
-  // 切换日期时重新载入（同一天的外部更新不覆盖正在编辑的内容）
-  useEffect(() => {
-    if (dateRef.current === date) return;
-    dateRef.current = date;
-    dirty.current = false;
-    setDraft(normalizeDailyLog(log, date));
-    setStatus('clean');
-  }, [date, log]);
-
   const patch = useCallback((fn: (prev: DailyLog) => DailyLog) => {
     setDraft((prev) => fn(prev));
     dirty.current = true;
@@ -191,16 +182,45 @@ export function SummaryForm({
           bodyFatPct: body.bodyFatPct ?? null,
         });
       }
-      dirty.current = false;
-      setStatus('saved');
-      setLastSavedAt(saved.updatedAt);
+      // 日期切换期间可能仍在完成旧日期的异步保存。旧保存不能清掉新日期
+      // 后续产生的 dirty，也不能把新日期的状态显示成旧日期的保存时间。
+      if (dateRef.current === date) {
+        dirty.current = false;
+        setStatus('saved');
+        setLastSavedAt(saved.updatedAt);
+      }
       onSaved?.(saved);
     } catch (err) {
       console.error('[summary] 保存失败', err);
-      setStatus('error');
+      if (dateRef.current === date) setStatus('error');
       toast('保存失败，请检查浏览器存储空间', 'error');
     }
   }, [draft, date, onSaved, saveBodyMetric, saveDailyLog, toast]);
+
+  // 页面生命周期监听器只注册一次，但保存时必须读取最后一次渲染的草稿。
+  // 直接把 persist 放进监听 effect 的依赖会在每次输入后重绑监听器；用 ref
+  // 既避免重复监听，也避免卸载 cleanup 调用到旧闭包。
+  const persistRef = useRef(persist);
+
+  // 切换日期时，persistRef 仍指向上一渲染（旧日期 + 旧草稿）。先刷新旧草稿，
+  // 再切换到新日期；随后下方 effect 才会把 ref 更新为新日期的 persist。
+  useEffect(() => {
+    if (dateRef.current === date) return;
+    if (dirty.current) void persistRef.current();
+    dateRef.current = date;
+    dirty.current = false;
+    setDraft(normalizeDailyLog(log, date));
+    setStatus('clean');
+    setLastSavedAt(log?.updatedAt ?? null);
+  }, [date, log]);
+
+  useEffect(() => {
+    persistRef.current = persist;
+  }, [persist]);
+
+  const flushPending = useCallback(() => {
+    if (dirty.current) void persistRef.current();
+  }, []);
 
   // 自动保存：输入停止 800ms 后写库
   useEffect(() => {
@@ -209,17 +229,19 @@ export function SummaryForm({
     return () => clearTimeout(timer);
   }, [draft, persist]);
 
-  // 离开页面前尽力保存一次
+  // 离开页面、切到后台或被 SPA 路由卸载前尽力保存一次。
   useEffect(() => {
-    const onLeave = () => {
-      if (dirty.current) void persist();
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') flushPending();
     };
-    window.addEventListener('pagehide', onLeave);
-    document.addEventListener('visibilitychange', () => {
-      if (document.visibilityState === 'hidden') onLeave();
-    });
-    return () => window.removeEventListener('pagehide', onLeave);
-  }, [persist]);
+    window.addEventListener('pagehide', flushPending);
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    return () => {
+      window.removeEventListener('pagehide', flushPending);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+      flushPending();
+    };
+  }, [flushPending]);
 
   const progress = useMemo(() => dailyProgress(draft), [draft]);
   const sectionLines = useMemo(

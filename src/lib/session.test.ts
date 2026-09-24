@@ -97,6 +97,28 @@ describe('buildLiveSession', () => {
     expect(s.exercises[1].sets[0].reps).toBeNull();
   });
 
+  it('时间型范围默认记录 durationSec 而不是 reps', () => {
+    const plan = makePlan();
+    plan.exercises[1].target = {
+      sets: 2,
+      durationSec: 35,
+      durationText: '25-35秒/侧',
+      restSec: 60,
+    };
+    const s = buildLiveSession(plan);
+    expect(s.exercises[1].sets[0].durationSec).toBe(35);
+    expect(s.exercises[1].sets[0].reps).toBeNull();
+
+    const done = completeSetAndRest(
+      s,
+      s.exercises[1].sets[0].id,
+      { durationSec: 30, reps: null, rpe: 7 },
+      60,
+    ).session;
+    expect(done.exercises[1].sets[0].durationSec).toBe(30);
+    expect(done.exercises[1].sets[0].reps).toBeNull();
+  });
+
   it('没有动作的计划也不会崩溃', () => {
     const plan = makePlan();
     plan.exercises = [];

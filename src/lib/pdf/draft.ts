@@ -197,6 +197,22 @@ export function describeDraft(draft: AnyDraft): string {
   }
 }
 
+/** 按入口意图选择可复用的历史导入；计划入口忽略以前误存成总结/报告的同一文件。 */
+export function findSavedImportForIntent(
+  records: PdfImportRecord[],
+  fileName: string,
+  fileSize: number,
+  intent: 'auto' | 'plan' = 'auto',
+): PdfImportRecord | null {
+  const matches = records.filter(
+    (r) => r.saved && r.fileName === fileName && Math.abs(r.fileSize - fileSize) < 1024,
+  );
+  if (intent === 'plan') {
+    return matches.find((r) => r.kind === 'plan' || r.kind === 'weekly-plan') ?? null;
+  }
+  return matches[0] ?? null;
+}
+
 export function findDuplicateImport(
   records: PdfImportRecord[],
   fileName: string,

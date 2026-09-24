@@ -6,10 +6,13 @@
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { AppDataProvider } from '../state/AppData';
 import { ToastProvider } from '../components/ui';
+import { dbClearAll, dbGetAll, dbPut } from '../db/db';
+import { buildLiveSession } from '../lib/session';
 import LiveWorkoutPage from './LiveWorkoutPage';
+import type { TrainingPlan } from '../types';
 
 function renderLive(entry = '/live') {
   return render(
@@ -83,6 +86,61 @@ describe('LiveWorkoutPage', () => {
     expect(screen.getByTestId('live-progress').textContent).toContain('动作 2/6');
   }, 30000);
 
+  it('时间型动作按秒展示和记录，不显示或写入次数', async () => {
+    await dbClearAll();
+    const now = new Date().toISOString();
+    const plan: TrainingPlan = {
+      id: 'timed-plan',
+      title: '时间型核心训练',
+      date: now.slice(0, 10),
+      kind: 'strength',
+      source: 'manual',
+      estimatedMinutes: 20,
+      warmup: [],
+      exercises: [
+        {
+          id: 'timed-copenhagen',
+          name: '哥本哈根侧桥',
+          kind: 'strength',
+          target: {
+            sets: 2,
+            durationSec: 35,
+            durationText: '25-35秒/侧',
+            durationPerSide: true,
+            restSec: 60,
+          },
+          order: 0,
+        },
+      ],
+      cooldown: '',
+      createdAt: now,
+      updatedAt: now,
+    };
+    await dbPut('plans', plan);
+    const session = buildLiveSession(plan);
+    await dbPut('sessions', session);
+
+    const user = userEvent.setup();
+    renderLive();
+    expect(await screen.findByTestId('live-exercise-name')).toHaveTextContent('哥本哈根侧桥');
+    expect(screen.queryByTestId('live-set-reps')).toBeNull();
+    expect(screen.getByLabelText('实际时长（秒/侧）')).toBeTruthy();
+    const duration = screen.getByTestId('live-set-duration');
+    await waitFor(() => expect((duration as HTMLInputElement).value).toBe('35'));
+
+    await user.clear(duration);
+    await user.type(duration, '30');
+    await user.click(screen.getByTestId('live-complete-set'));
+
+    await waitFor(async () => {
+      const rows = await dbGetAll('sessions');
+      const saved = rows.find((row) => row.id === session.id);
+      expect(saved?.exercises[0].sets[0].durationSec).toBe(30);
+      expect(saved?.exercises[0].sets[0].reps).toBeNull();
+    });
+    await dbClearAll();
+  }, 30000);
+
   it('训练数据写入 IndexedDB，重新进入会恢复进度', async () => {
     const user = userEvent.setup();
     const first = renderLive();
@@ -102,6 +160,7 @@ describe('LiveWorkoutPage', () => {
     const resumed = await screen.findByTestId('live-exercise-name', {}, { timeout: 8000 });
     expect(resumed.textContent).toBe(nameBefore);
     expect(screen.getByTestId('live-progress').textContent).toBe(progressBefore);
+    await screen.findByText(/^已恢复上次进度：/);
     await waitFor(() =>
       expect(screen.getByTestId('live-complete-set').textContent?.trim()).not.toBe(
         buttonBefore.trim(),
@@ -154,5 +213,58 @@ describe('LiveWorkoutPage', () => {
     const finish = await screen.findByTestId('live-finish-session', {}, { timeout: 4000 });
     await user.click(finish);
     await screen.findByTestId('live-finish-confirm', {}, { timeout: 4000 });
+  }, 30000);
+
+  it('快速双击保存总结时，同一个 session 只生成一条记录', async () => {
+    await dbClearAll();
+    const user = userEvent.setup();
+    renderLive();
+    await startLowerBodyPlan(user);
+
+    const active = (await dbGetAll('sessions')).find((session) => session.status === 'active');
+    expect(active).toBeTruthy();
+
+    await user.click(screen.getByTestId('live-pause'));
+    await user.click(await screen.findByTestId('live-end-early'));
+    const confirm = await screen.findByTestId('live-finish-confirm', {}, { timeout: 4000 });
+    await user.dblClick(confirm);
+
+    await screen.findByTestId('summary-route', {}, { timeout: 8000 });
+    await waitFor(async () => {
+      const rows = await dbGetAll('summaries');
+      expect(rows.filter((summary) => summary.sessionId === active?.id)).toHaveLength(1);
+    });
+  }, 30000);
+
+  it('保存失败会释放防重锁，用户可以重试成功', async () => {
+    await dbClearAll();
+    const user = userEvent.setup();
+    renderLive();
+    await startLowerBodyPlan(user);
+
+    const active = (await dbGetAll('sessions')).find((session) => session.status === 'active');
+    expect(active).toBeTruthy();
+
+    await user.click(screen.getByTestId('live-pause'));
+    await user.click(await screen.findByTestId('live-end-early'));
+    const confirm = await screen.findByTestId('live-finish-confirm', {}, { timeout: 4000 });
+
+    const putSpy = vi
+      .spyOn(IDBObjectStore.prototype, 'put')
+      .mockImplementationOnce(() => {
+        throw new Error('模拟总结写入失败');
+      });
+    await user.click(confirm);
+    await screen.findByText('保存失败，请重试');
+    expect(confirm).toBeEnabled();
+    expect(confirm).toHaveTextContent('保存总结');
+    putSpy.mockRestore();
+
+    await user.click(confirm);
+    await screen.findByTestId('summary-route', {}, { timeout: 8000 });
+    await waitFor(async () => {
+      const rows = await dbGetAll('summaries');
+      expect(rows.filter((summary) => summary.sessionId === active?.id)).toHaveLength(1);
+    });
   }, 30000);
 });

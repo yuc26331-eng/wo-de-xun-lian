@@ -151,6 +151,7 @@ export function TextInput({
   min,
   step,
   testId,
+  ariaLabel,
 }: {
   value: string;
   onChange: (v: string) => void;
@@ -161,6 +162,7 @@ export function TextInput({
   min?: number;
   step?: number;
   testId?: string;
+  ariaLabel?: string;
 }) {
   return (
     <input
@@ -173,6 +175,7 @@ export function TextInput({
       min={min}
       step={step}
       data-testid={testId}
+      aria-label={ariaLabel}
       onChange={(e: ChangeEvent<HTMLInputElement>) => onChange(e.target.value)}
     />
   );

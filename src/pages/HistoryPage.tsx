@@ -147,7 +147,12 @@ export default function HistoryPage() {
       </div>
 
       <SectionTitle>筛选与搜索</SectionTitle>
-      <TextInput value={query} onChange={setQuery} placeholder="搜索计划名或动作名" />
+      <TextInput
+        value={query}
+        onChange={setQuery}
+        placeholder="搜索计划名或动作名"
+        ariaLabel="搜索训练记录"
+      />
       <div style={{ marginTop: 10 }}>
         <Segmented<Filter>
           value={filter}
@@ -211,8 +216,8 @@ export default function HistoryPage() {
                 onClick={() => {
                   setEditForm({
                     title: detail.planTitle,
-                    durationMin: String(Math.round(detail.totalDurationSec / 60)),
-                    volume: String(Math.round(detail.totalVolumeKg)),
+                    durationMin: String(Math.round((detail.totalDurationSec / 60) * 100) / 100),
+                    volume: String(detail.totalVolumeKg),
                     sets: String(detail.totalSets),
                     reps: String(detail.totalReps),
                     rpe: detail.rpe != null ? String(detail.rpe) : '',
@@ -396,7 +401,7 @@ export default function HistoryPage() {
                 <TextInput
                   value={editForm.durationMin}
                   onChange={(v) => setEditForm((f) => ({ ...f, durationMin: v }))}
-                  inputMode="numeric"
+                  inputMode="decimal"
                 />
               </Field>
             </div>
@@ -405,7 +410,7 @@ export default function HistoryPage() {
                 <TextInput
                   value={editForm.volume}
                   onChange={(v) => setEditForm((f) => ({ ...f, volume: v }))}
-                  inputMode="numeric"
+                  inputMode="decimal"
                 />
               </Field>
             </div>

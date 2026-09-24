@@ -368,7 +368,7 @@ export default function TrainPage() {
     navigate('/live');
   }
 
-  async function useTemplate(templateId: string) {
+  async function applyTemplate(templateId: string) {
     const tpl = templates.find((t) => t.id === templateId);
     if (!tpl) return;
     const now = nowISO();
@@ -609,7 +609,7 @@ export default function TrainPage() {
                   sub={`${t.exercises.length} 个动作${t.estimatedMinutes ? ` · ${t.estimatedMinutes} 分钟` : ''}`}
                   right={
                     <div className="row" style={{ gap: 6 }}>
-                      <Button size="sm" variant="primary" onClick={() => void useTemplate(t.id)}>
+                      <Button size="sm" variant="primary" onClick={() => void applyTemplate(t.id)}>
                         使用
                       </Button>
                       <button

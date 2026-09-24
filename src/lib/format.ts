@@ -43,8 +43,8 @@ export function dayLabel(date: ISODate): string {
   const today = toISODate();
   const diff = dayDiff(date, today);
   if (diff === 0) return '今天';
-  if (diff === 1) return '昨天';
-  if (diff === -1) return '明天';
+  if (diff === -1) return '昨天';
+  if (diff === 1) return '明天';
   const d = parseISODate(date);
   return WEEKDAY[d.getDay()];
 }
@@ -76,8 +76,9 @@ export function formatClock(totalSec: number): string {
 export function formatDurationCN(totalSec: number | null | undefined): string {
   if (totalSec == null || !isFinite(totalSec)) return '—';
   const s = Math.max(0, Math.round(totalSec));
-  const h = Math.floor(s / 3600);
-  const m = Math.round((s % 3600) / 60);
+  const roundedMinutes = Math.round(s / 60);
+  const h = Math.floor(roundedMinutes / 60);
+  const m = roundedMinutes % 60;
   if (h > 0) return m > 0 ? `${h}小时${m}分` : `${h}小时`;
   if (m > 0) return `${m}分钟`;
   return `${s}秒`;
@@ -108,9 +109,9 @@ export function formatVolume(kg: number | null | undefined): string {
 /** 配速文字 5'30"/km */
 export function formatPace(distanceKm: number | null, durationSec: number | null): string {
   if (!distanceKm || !durationSec || distanceKm <= 0) return '—';
-  const secPerKm = durationSec / distanceKm;
+  const secPerKm = Math.round(durationSec / distanceKm);
   const m = Math.floor(secPerKm / 60);
-  const s = Math.round(secPerKm % 60);
+  const s = secPerKm % 60;
   return `${m}'${`${s}`.padStart(2, '0')}"/km`;
 }
 
@@ -126,8 +127,9 @@ export function paceToSecPerKm(paceText: string | null | undefined): number | nu
 /** 秒 -> '5:30' */
 export function secPerKmToText(secPerKm: number | null): string {
   if (secPerKm == null || !isFinite(secPerKm)) return '—';
-  const m = Math.floor(secPerKm / 60);
-  const s = Math.round(secPerKm % 60);
+  const rounded = Math.round(secPerKm);
+  const m = Math.floor(rounded / 60);
+  const s = rounded % 60;
   return `${m}:${`${s}`.padStart(2, '0')}`;
 }
 
